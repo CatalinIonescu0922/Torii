@@ -1,0 +1,32 @@
+version: "3.9"
+
+services:
+  gerrit:
+    extends:
+      file: ./gerrit.yaml
+      service: gerrit
+  jenkins:
+    extends:
+      file: ./jenkins.yaml
+      service: jenkins
+    depends_on:
+      gerrit:
+        condition: service_healthy
+  nginx:
+    extends:
+      file: ./nginx.yaml
+      service: nginx
+    depends_on:
+      gerrit:
+        condition: service_healthy
+      jenkins:
+        condition: service_healthy
+
+networks:
+  torii:
+    driver: bridge
+
+volumes:
+  gerrit_data:
+  jenkins_home:
+    

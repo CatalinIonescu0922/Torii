@@ -6,7 +6,7 @@ review, pre‑merges changes in an isolated staging area so jobs see the
 "merged state," dispatches builds to a worker pool, and reports results back
 to Gerrit.
 
-This project is built by Catalin Ionescu as a capstone/final exam project.
+This project is built by Catalin Ionescu as a final exam project.
 
 ## Overview
 
@@ -26,8 +26,7 @@ Torii focuses on three pillars:
   branch to expose the full, merged code to jobs. Handles conflicts and
   updates status appropriately.
 - Job Dispatcher: Abstraction layer that launches jobs on available workers.
-  Initial target is Gearman, but the interface allows alternatives
-  (e.g., RabbitMQ, Kubernetes Jobs, or direct Jenkins integration).
+  Initial target is Gearman,the interface may implement something diffrent 
 - Execution Layer: A Jenkins agent and one or more workers to provide a
   consistent runtime environment for jobs.
 - (Optional) Artifacts + Logs: Storage for build outputs and logs (e.g.,
