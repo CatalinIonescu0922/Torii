@@ -3,12 +3,6 @@ services:
     image: gerritcodereview/gerrit:${GERRIT_VERSION}
     container_name: gerrit
     restart: unless-stopped
-    ports:
-      - "8080:8080"
-      - "29418:29418"
-    enviroments:
-      CANONICAL_WEB_URL = http://gerrit:8080/g
-      HTTPD_LISTEN_URL = proxy-http://*:8080/g
     volumes:
       - gerrit_etc:/var/gerrit/etc
       - gerrit_git:/var/gerrit/git
@@ -21,10 +15,11 @@ services:
          - |
            set -e  
            [ -f /var/gerrit/etc/gerrit.config ] || cp /bootstrap/gerrit.config /var/gerrit/etc/
+
            exec /entrypoint.sh 
 
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/config/server/info || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/login || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 24
@@ -32,7 +27,19 @@ services:
     networks:
       - torii
   gerrit-config:
-    image: curl
+    pull-policy : build
+    build : 
+      docker-inline: |
+        FROM curlimages:curl:${CURL_VERSION}
+        COPY --from=ssh_files / /root/.ssh/
+
+
+        FROM 
+        COPY --from=layout_file /layout.yaml /root/
+      additional_context:
+        ssh_files : .files/ssh/
+        layout_file : .files/torri/
+
 
 volumes:
   gerrit_etc:

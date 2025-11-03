@@ -1,0 +1,6 @@
+Host gerrit
+  HostName 127.0.0.1
+  User torri
+  StrictHostKeyChecking Yes
+  IdentityFile ./Torri_ed25519
+  
