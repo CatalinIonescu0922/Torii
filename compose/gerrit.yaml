@@ -32,7 +32,7 @@ services:
       docker-inline: |
         FROM curlimages:curl:${CURL_VERSION}
         COPY --from=ssh_files / /root/.ssh/
-
+        
 
         FROM 
         COPY --from=layout_file /layout.yaml /root/
