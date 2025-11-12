@@ -1,0 +1,46 @@
+# Gerrit Project Layout Configuration
+# Test setup with a small set of projects
+
+projects:
+  # Infrastructure
+  - name: infrastructure/terraform
+    description: "Infrastructure as Code with Terraform"
+    parent: All-Projects
+    branches:
+      - main
+      - develop
+    submit_type: MERGE_IF_NECESSARY
+    
+  # Backend Services
+  - name: services/api-gateway
+    description: "Main API Gateway service"
+    parent: All-Projects
+    branches:
+      - main
+      - develop
+    submit_type: REBASE_IF_NECESSARY
+    
+  - name: services/auth-service
+    description: "Authentication and authorization"
+    parent: All-Projects
+    branches:
+      - main
+      - develop
+    submit_type: REBASE_IF_NECESSARY
+
+  # Shared Library
+  - name: libraries/common-utils
+    description: "Shared utilities library"
+    parent: All-Projects
+    branches:
+      - main
+    submit_type: MERGE_IF_NECESSARY
+
+  # Frontend
+  - name: web/frontend-app
+    description: "Frontend web application"
+    parent: All-Projects
+    branches:
+      - main
+      - develop
+    submit_type: REBASE_IF_NECESSARY

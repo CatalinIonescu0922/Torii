@@ -1,0 +1,105 @@
+# Pipeline Definitions
+# Simple test pipelines for demo/development
+
+pipelines:
+  # Basic verification pipeline
+  - name: verify-pipeline
+    description: "Basic verification for code review"
+    type: ci
+    triggers:
+      - patchset-created
+      - draft-published
+    
+    stages:
+      - name: checkout
+        steps:
+          - action: git-clone
+            
+      - name: build
+        steps:
+          - action: compile
+            commands:
+              maven: "mvn clean compile"
+              npm: "npm run build"
+              
+      - name: test
+        steps:
+          - action: unit-tests
+            commands:
+              maven: "mvn test"
+              npm: "npm test"
+            coverage:
+              enabled: true
+              threshold: 70
+              
+          - action: lint
+            tools:
+              - eslint
+              - checkstyle
+
+    post_actions:
+      success:
+        - gerrit-vote:
+            verified: +1
+        - comment: "Build passed ✓"
+      failure:
+        - gerrit-vote:
+            verified: -1
+        - comment: "Build failed ✗"
+
+  # Simple merge pipeline
+  - name: merge-pipeline
+    description: "Build and package after merge"
+    type: ci
+    triggers:
+      - change-merged
+    
+    stages:
+      - name: build
+        steps:
+          - action: checkout
+          - action: compile
+          - action: test
+            
+      - name: package
+        steps:
+          - action: build-docker
+            tags:
+              - "${BRANCH}-${BUILD_NUMBER}"
+              
+          - action: publish
+            registry: "internal-registry"
+
+  # Simple deployment pipeline
+  - name: deploy-pipeline
+    description: "Deploy to environment"
+    type: cd
+    
+    parameters:
+      - name: ENVIRONMENT
+        type: choice
+        choices:
+          - dev
+          - staging
+        default: dev
+        
+    stages:
+      - name: deploy
+        steps:
+          - action: deploy-kubernetes
+            namespace: ${ENVIRONMENT}
+            
+          - action: health-check
+            endpoint: /health
+            timeout: 1m
+            
+          - action: smoke-test
+
+    post_actions:
+      success:
+        - notify:
+            slack: "#deployments"
+      failure:
+        - rollback: true
+        - notify:
+            slack: "#incidents"

@@ -1,0 +1,188 @@
+# Jenkins Job Definitions
+# Simple test jobs for demo
+
+jobs:
+  # Infrastructure jobs
+  - name: verify-terraform
+    display_name: "Verify Terraform Changes"
+    project: infrastructure/terraform
+    branches:
+      - "**"
+    pipeline: verify-pipeline
+    
+    gerrit_trigger:
+      - event: patchset-created
+      
+    custom_steps:
+      - terraform-validate
+      - terraform-plan
+      
+    vote:
+      verified: [-1, +1]
+
+  - name: merge-terraform
+    display_name: "Merge Terraform"
+    project: infrastructure/terraform
+    branches:
+      - main
+    pipeline: merge-pipeline
+    
+    gerrit_trigger:
+      - event: change-merged
+
+  # API Gateway jobs
+  - name: verify-api-gateway
+    display_name: "Verify API Gateway"
+    project: services/api-gateway
+    branches:
+      - "**"
+    pipeline: verify-pipeline
+    
+    gerrit_trigger:
+      - event: patchset-created
+      
+    build_tools:
+      - maven
+      - docker
+      
+    vote:
+      verified: [-1, +1]
+
+  - name: merge-api-gateway
+    display_name: "Merge API Gateway"
+    project: services/api-gateway
+    branches:
+      - develop
+      - main
+    pipeline: merge-pipeline
+    
+    gerrit_trigger:
+      - event: change-merged
+      
+    post_build:
+      - trigger: deploy-api-gateway
+        when: branch == 'develop'
+
+  - name: deploy-api-gateway
+    display_name: "Deploy API Gateway"
+    project: services/api-gateway
+    branches:
+      - develop
+    pipeline: deploy-pipeline
+    
+    trigger_type: downstream
+    
+    parameters:
+      ENVIRONMENT: dev
+
+  # Auth Service jobs
+  - name: verify-auth-service
+    display_name: "Verify Auth Service"
+    project: services/auth-service
+    branches:
+      - "**"
+    pipeline: verify-pipeline
+    
+    gerrit_trigger:
+      - event: patchset-created
+      
+    vote:
+      verified: [-1, +1]
+
+  - name: merge-auth-service
+    display_name: "Merge Auth Service"
+    project: services/auth-service
+    branches:
+      - develop
+      - main
+    pipeline: merge-pipeline
+    
+    gerrit_trigger:
+      - event: change-merged
+
+  # Library jobs
+  - name: verify-common-utils
+    display_name: "Verify Common Utils"
+    project: libraries/common-utils
+    branches:
+      - "**"
+    pipeline: verify-pipeline
+    
+    gerrit_trigger:
+      - event: patchset-created
+      
+    vote:
+      verified: [-1, +1]
+
+  - name: merge-common-utils
+    display_name: "Merge Common Utils"
+    project: libraries/common-utils
+    branches:
+      - main
+    pipeline: merge-pipeline
+    
+    gerrit_trigger:
+      - event: change-merged
+
+  # Frontend jobs
+  - name: verify-frontend
+    display_name: "Verify Frontend App"
+    project: web/frontend-app
+    branches:
+      - "**"
+    pipeline: verify-pipeline
+    
+    gerrit_trigger:
+      - event: patchset-created
+      
+    build_tools:
+      - node
+      - npm
+      
+    vote:
+      verified: [-1, +1]
+
+  - name: merge-frontend
+    display_name: "Merge Frontend App"
+    project: web/frontend-app
+    branches:
+      - develop
+      - main
+    pipeline: merge-pipeline
+    
+    gerrit_trigger:
+      - event: change-merged
+      
+    post_build:
+      - trigger: deploy-frontend
+        when: branch == 'develop'
+
+  - name: deploy-frontend
+    display_name: "Deploy Frontend App"
+    project: web/frontend-app
+    branches:
+      - develop
+    pipeline: deploy-pipeline
+    
+    trigger_type: downstream
+    
+    parameters:
+      ENVIRONMENT: dev
+
+  # Nightly build
+  - name: nightly-build
+    display_name: "Nightly Full Build"
+    project: "**"
+    branches:
+      - main
+    
+    trigger_type: cron
+    schedule: "0 2 * * *"
+    
+    stages:
+      - full-build
+      - all-tests
+      
+    notifications:
+      on_completion:
+        - email: "team@example.com"
