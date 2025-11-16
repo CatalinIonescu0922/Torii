@@ -5,6 +5,21 @@ services:
     extends:
       file: ./gerrit.yaml
       service: gerrit
+
+  gerrit-config:
+    pull-policy : build
+    build : 
+      docker-inline: |
+        FROM alpine:latest 
+        COPY --from=ssh_files / /root/.ssh/
+        COPY --from=layout_file / /tmp/layout/
+        #ensure a propper permissions for the ssh files and configs
+        RUN chmod 600 /root/.ssh/*
+        RUN apk --no-cache add curl yq openssh-client git
+      additional_context:
+        ssh_files : .files/ssh/
+        layout_file : .files/torri/
+
   jenkins:
     extends:
       file: ./jenkins.yaml

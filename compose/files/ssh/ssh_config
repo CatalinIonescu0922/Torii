@@ -1,6 +1,8 @@
 Host gerrit
   HostName 127.0.0.1
   User torri
+  Port 29418
+  StrictHostKeyChecking no 
   StrictHostKeyChecking Yes
-  IdentityFile ./Torri_ed25519
+  IdentityFile /root/.ssh/Torri_ed25519
   

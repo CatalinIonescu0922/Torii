@@ -13,7 +13,7 @@ services:
     entrypoint: ["/bin/sh" ,"-c"]
     command: 
          - |
-           set -e  
+           set -e  pipefail
            [ -f /var/gerrit/etc/gerrit.config ] || cp /bootstrap/gerrit.config /var/gerrit/etc/
 
            exec /entrypoint.sh 
@@ -27,19 +27,37 @@ services:
     networks:
       - torii
   gerrit-config:
-    pull-policy : build
-    build : 
-      docker-inline: |
-        FROM curlimages:curl:${CURL_VERSION}
-        COPY --from=ssh_files / /root/.ssh/
+    extends: 
+      file: build.yaml
+      service: gerrit-config
+      entrypoint: 
+        - bash 
+        - c
+      command: 
+      - | 
+        set -uoe pipefail -x
+        # create the account with curl 
+        curl -X GET http://localhost:8087/g/ -H "X-Bootstrap-Token: secret"
+        curl -X POST http://localhost:8087/g/a/accounts/self/sshkeys \
+          -H "X-Bootstrap-Token: secret" \
+          -H "Content-Type: text/plain" \
+          --data-binary @/root/.ssh/Torri_ed25519.pub \
+        # create the projects with yg 
+         while IFS="|" read -r name branches; do
+            project_branches["$${name}"]="$${branches}"
+         done < <(yq -r '.projects[] | .name + "|" + (.branches | join(" "))' /tmp/layout/projects.yaml)
+         # loop through the projects and branches and create them 
+         for proj in "$${!project_branches[@]}"; do
+            ssh gerrit gerrit create-project "$${proj}" --empty-commit || echo "  -> Exists"
+            branches_string="$${project_branches[$${proj}]}"
+            current_branches=($${branches_string})
+            for branch in "$${current_branches[@]}"; do
+                if [[ -n "$${branch}" ]]; then
+                    ssh gerrit gerrit create-branch "$${proj}" "$${branch}" master || echo "  -> Branch exists"
+                fi
+            done
+        done
         
-
-        FROM 
-        COPY --from=layout_file /layout.yaml /root/
-      additional_context:
-        ssh_files : .files/ssh/
-        layout_file : .files/torri/
-
 
 volumes:
   gerrit_etc:
