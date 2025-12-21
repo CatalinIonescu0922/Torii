@@ -1,7 +1,11 @@
 services:
   gerrit:
-    image: gerritcodereview/gerrit:${GERRIT_VERSION}
+    extends: 
+      file: build.yaml
+      service: gerrit
     container_name: gerrit
+    environment:
+      CANONICAL_WEB_URL: http://localhost:8087/g/
     restart: unless-stopped
     volumes:
       - gerrit_etc:/var/gerrit/etc
@@ -9,45 +13,35 @@ services:
       - gerrit_index:/var/gerrit/index
       - gerrit_cache:/var/gerrit/cache
       - gerrit_plugins:/var/gerrit/plugins
-      - ./files/gerrit:/bootstrap:ro
-    entrypoint: ["/bin/sh" ,"-c"]
-    command: 
-         - |
-           set -e  pipefail
-           [ -f /var/gerrit/etc/gerrit.config ] || cp /bootstrap/gerrit.config /var/gerrit/etc/
-
-           exec /entrypoint.sh 
-
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/login || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/config/server/version || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 24
       start_period: 60s
-    networks:
-      - torii
+
+
   gerrit-config:
     extends: 
       file: build.yaml
       service: gerrit-config
-      entrypoint: 
-        - bash 
-        - c
-      command: 
+    entrypoint: ["bash", "-c"] 
+    command: 
       - | 
         set -uoe pipefail -x
         # create the account with curl 
-        curl -X GET http://localhost:8087/g/ -H "X-Bootstrap-Token: secret"
-        curl -X POST http://localhost:8087/g/a/accounts/self/sshkeys \
+        curl -L -X GET http://nginx:8087/g/ -H "X-Bootstrap-Token: secret"
+        curl  -L  -X POST http://nginx:8087/g/a/accounts/self/sshkeys \
           -H "X-Bootstrap-Token: secret" \
           -H "Content-Type: text/plain" \
-          --data-binary @/root/.ssh/Torri_ed25519.pub \
+          --data-binary @/root/.ssh/Torri_ed25519.pub 
         # create the projects with yg 
-         while IFS="|" read -r name branches; do
+          declare -A project_branches
+          while IFS="|" read -r name branches; do
             project_branches["$${name}"]="$${branches}"
-         done < <(yq -r '.projects[] | .name + "|" + (.branches | join(" "))' /tmp/layout/projects.yaml)
-         # loop through the projects and branches and create them 
-         for proj in "$${!project_branches[@]}"; do
+          done < <(yq -r '.projects[] | .name + "|" + (.branches | join(" "))' /tmp/layout/projects.yaml)
+          # loop through the projects and branches and create them 
+          for proj in "$${!project_branches[@]}"; do
             ssh gerrit gerrit create-project "$${proj}" --empty-commit || echo "  -> Exists"
             branches_string="$${project_branches[$${proj}]}"
             current_branches=($${branches_string})
@@ -57,15 +51,41 @@ services:
                 fi
             done
         done
-        
+        WORK_DIR="$$(mktemp -d)"
+        cd "$$WORK_DIR"
+        git clone ssh://gerrit/All-Projects .
+        git fetch origin refs/meta/config:refs/remotes/origin/config
+        git checkout refs/meta/config
+        git config -f project.config label.Verified.function "MaxWithBlock"
+        git config -f project.config label.Verified.defaultValue "0"
+        git config -f project.config label.Verified.value "-1 Fails"
+        git config -f project.config label.Verified.value "0 No score"
+        git config -f project.config label.Verified.value "+1 Verified"
 
+        # B. MAKE IT MANDATORY (The Submit Requirement)
+        # This tells Gerrit: "You cannot submit unless Verified is at MAX (+1)"
+        git config -f project.config submit-requirement.Verified.description "CI Build must pass"
+        git config -f project.config submit-requirement.Verified.submittableIf "label:Verified=MAX"
+        git config -f project.config submit-requirement.Verified.canOverrideInChildProjects "true"
+
+        git config -f project.config label.GateKeeper.function "MaxWithBlock"
+        git config -f project.config label.GateKeeper.defaultValue "0"
+        git config -f project.config label.GateKeeper.value "-1 Blocked"
+        git config -f project.config label.GateKeeper.value "0 No score"
+        git config -f project.config label.GateKeeper.value "+1 Approved"
+
+        # B. MAKE IT MANDATORY
+        # This tells Gerrit: "You cannot submit unless GateKeeper is at MAX (+1)"
+        git config -f project.config submit-requirement.GateKeeper.description "Must be approved by GateKeeper"
+        git config -f project.config submit-requirement.GateKeeper.submittableIf "label:GateKeeper=MAX"
+        git config -f project.config submit-requirement.GateKeeper.canOverrideInChildProjects "true"
+
+        git config -f project.config submit-requirement.Code-Review.submittableIf "label:Code-Review=MAX"
+        git commit -am "Add labels and submitType for them" || true
+        git push origin HEAD:refs/meta/config
 volumes:
   gerrit_etc:
   gerrit_git:
   gerrit_index:
   gerrit_cache:
   gerrit_plugins:
-
-networks:
-  torii:
-    name: torii
