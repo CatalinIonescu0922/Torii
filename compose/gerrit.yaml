@@ -14,11 +14,11 @@ services:
       - gerrit_cache:/var/gerrit/cache
       - gerrit_plugins:/var/gerrit/plugins
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8080/config/server/version || exit 1"]
+      test: ["CMD-SHELL", "curl -svf --noproxy '*' http://localhost:8080/config/server/version || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 24
-      start_period: 60s
+      start_period: 70s
 
 
   gerrit-config:
@@ -30,11 +30,10 @@ services:
       - | 
         set -uoe pipefail -x
         # create the account with curl 
-        curl -L -X GET http://nginx:8087/g/ -H "X-Bootstrap-Token: secret"
-        curl  -L  -X POST http://nginx:8087/g/a/accounts/self/sshkeys \
-          -H "X-Bootstrap-Token: secret" \
-          -H "Content-Type: text/plain" \
-          --data-binary @/root/.ssh/Torri_ed25519.pub 
+        gerrit=(docker exec gerrit ssh self suexec --as ${GERRIT_USER:?} -- gerrit)
+        "$${gerrit[@]}" set-account --add-email ${GERRIT_USER}@localdomain \
+                                    --http-password ${GERRIT_PASSWORD} \ 
+                                    --add-ssh-key - self < /root/.ssh/Torri_ed25519.pub 
         # create the projects with yg 
           declare -A project_branches
           while IFS="|" read -r name branches; do
@@ -42,12 +41,12 @@ services:
           done < <(yq -r '.projects[] | .name + "|" + (.branches | join(" "))' /tmp/layout/projects.yaml)
           # loop through the projects and branches and create them 
           for proj in "$${!project_branches[@]}"; do
-            ssh gerrit gerrit create-project "$${proj}" --empty-commit || echo "  -> Exists"
+            "$${gerrit[@]}" create-project "$${proj}" --empty-commit || echo "  -> Exists"
             branches_string="$${project_branches[$${proj}]}"
             current_branches=($${branches_string})
             for branch in "$${current_branches[@]}"; do
                 if [[ -n "$${branch}" ]]; then
-                    ssh gerrit gerrit create-branch "$${proj}" "$${branch}" master || echo "  -> Branch exists"
+                    "$${gerrit[@]}" create-branch "$${proj}" "$${branch}" master || echo "  -> Branch exists"
                 fi
             done
         done
