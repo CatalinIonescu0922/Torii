@@ -5,7 +5,8 @@ services:
     build:
       dockerfile_inline: | 
         FROM gerritcodereview/gerrit:${GERRIT_VERSION}
-        COPY --from=gerrit_config /gerrit.config /var/gerrit/etc/
+        COPY --link --chown=1000:1000 --from=gerrit_config /etc/ /var/gerrit/etc/
+        COPY --link --chown=1000:1000 --from=gerrit_config  --chmod=600 /ssh/ /var/gerrit/.ssh/
       additional_contexts:
         gerrit_config : files/gerrit/
     networks:
@@ -15,12 +16,12 @@ services:
     pull_policy : build
     build : 
       dockerfile_inline: |
-        FROM alpine:latest 
-        COPY --from=ssh_files / /root/.ssh/
-        COPY --from=layout_file / /tmp/layout/
-        #ensure a propper permissions for the ssh files and configs
-        RUN chmod 600 /root/.ssh/*
-        RUN apk --no-cache add bash curl yq openssh-client git docker-cli
+        FROM mikefarah/yq:${YQ_TAG:?}
+        USER root
+        RUN apk add --no-cache openssh-client bash curl findutils git docker-cli
+        RUN rm -rf /root/.ssh && mkdir --mode=700 /root/.ssh
+        COPY --link --chmod=600 --from=ssh_files / /root/.ssh/
+        COPY --link --from=layout_file / /root/
       additional_contexts:
         ssh_files : files/ssh/
         layout_file : files/torri/
@@ -29,35 +30,13 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       gerrit:
-        condition: service_started
+        condition: service_healthy
     networks:
       - torri
 
   nginx:
     image: nginx:alpine
     container_name: nginx
-    volumes: 
-      - ./files/nginx/nginx.conf:/etc/nginx/nginx.conf
-    restart: unless-stopped
-    ports:
-      - "8087:8087"
-    healthcheck:
-      test : ["CMD-SHELL" , "curl -f http://localhost:8087/health || exit 1" ]
-      interval: 15s
-      timeout: 5s
-      retries: 10
-      start_period: 70s
-
-    networks:
-      - torri
-    depends_on:
-      gerrit:
-        condition: service_healthy
-    
-networks:
-  torri:
-    name: torri
-
     # depends_on:
     #   gerrit:
     #     condition: service_healthy

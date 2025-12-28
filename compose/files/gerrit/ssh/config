@@ -1,0 +1,8 @@
+Host self
+  HostName              localhost
+  Port                  29418
+  User                  "Gerrit Code Review"
+  IdentityFile          /var/gerrit/etc/ssh_host_ed25519_key
+  StrictHostKeyChecking no
+  UserKnownHostsFile    /dev/null
+  LogLevel              ERROR

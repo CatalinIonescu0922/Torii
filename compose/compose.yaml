@@ -1,0 +1,10 @@
+
+include:
+  - env_file: ./default.env
+    path:
+      - ./gerrit.yaml
+      - ./nginx.yaml
+
+networks:
+  torri:
+    name: torri

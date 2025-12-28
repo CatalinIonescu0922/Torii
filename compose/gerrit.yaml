@@ -5,16 +5,16 @@ services:
       service: gerrit
     container_name: gerrit
     environment:
-      CANONICAL_WEB_URL: http://localhost:8087/g/
+      CANONICAL_WEB_URL: http://gerrit:8080/g/
+      HTTPD_LISTEN_URL: proxy-http://*:8080/g/
     restart: unless-stopped
     volumes:
-      - gerrit_etc:/var/gerrit/etc
       - gerrit_git:/var/gerrit/git
       - gerrit_index:/var/gerrit/index
       - gerrit_cache:/var/gerrit/cache
       - gerrit_plugins:/var/gerrit/plugins
     healthcheck:
-      test: ["CMD-SHELL", "curl -svf --noproxy '*' http://localhost:8080/config/server/version || exit 1"]
+      test: ["CMD-SHELL", "curl -svf --noproxy '*' http://${GERRIT_USER:?}@localhost:8080/g/login || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 24
@@ -25,63 +25,40 @@ services:
     extends: 
       file: build.yaml
       service: gerrit-config
+    working_dir: /root
     entrypoint: ["bash", "-c"] 
     command: 
       - | 
         set -uoe pipefail -x
-        # create the account with curl 
-        gerrit=(docker exec gerrit ssh self suexec --as ${GERRIT_USER:?} -- gerrit)
-        "$${gerrit[@]}" set-account --add-email ${GERRIT_USER}@localdomain \
-                                    --http-password ${GERRIT_PASSWORD} \ 
-                                    --add-ssh-key - self < /root/.ssh/Torri_ed25519.pub 
-        # create the projects with yg 
-          declare -A project_branches
-          while IFS="|" read -r name branches; do
-            project_branches["$${name}"]="$${branches}"
-          done < <(yq -r '.projects[] | .name + "|" + (.branches | join(" "))' /tmp/layout/projects.yaml)
-          # loop through the projects and branches and create them 
-          for proj in "$${!project_branches[@]}"; do
-            "$${gerrit[@]}" create-project "$${proj}" --empty-commit || echo "  -> Exists"
-            branches_string="$${project_branches[$${proj}]}"
-            current_branches=($${branches_string})
-            for branch in "$${current_branches[@]}"; do
-                if [[ -n "$${branch}" ]]; then
-                    "$${gerrit[@]}" create-branch "$${proj}" "$${branch}" master || echo "  -> Branch exists"
-                fi
-            done
-        done
-        WORK_DIR="$$(mktemp -d)"
-        cd "$$WORK_DIR"
-        git clone ssh://gerrit/All-Projects .
-        git fetch origin refs/meta/config:refs/remotes/origin/config
-        git checkout refs/meta/config
-        git config -f project.config label.Verified.function "MaxWithBlock"
-        git config -f project.config label.Verified.defaultValue "0"
-        git config -f project.config label.Verified.value "-1 Fails"
-        git config -f project.config label.Verified.value "0 No score"
-        git config -f project.config label.Verified.value "+1 Verified"
+        gerrit=(docker exec -u root -i gerrit ssh -F /var/gerrit/.ssh/config self suexec --as ${GERRIT_USER:?} -- gerrit)
+        ls-projects() (yq '.projects[] | .name' /root/projects.yaml | grep -vF ^ | sed '/^---$/d')
+        "$${gerrit[@]}" set-account --add-email ${GERRIT_USER:?}@localdomain \
+                                    --http-password ${GERRIT_PASSWORD:?} \
+                                    --add-ssh-key - self < /root/.ssh/authorized_keys
+        comm -13 <("$${gerrit[@]}" ls-groups | sort) - <<< ${GERRIT_GROUP:?} |
+            xargs -trn1 "$${gerrit[@]}" create-group --member self
+        comm -13 <("$${gerrit[@]}" ls-projects | sort) - <<< ${GERRIT_PERMISSIONS_REPO:?} |
+            xargs -trn1 "$${gerrit[@]}" create-project --owner ${GERRIT_GROUP:?} --permissions-only
+        comm -13 <("$${gerrit[@]}" ls-projects | sort) <(ls-projects | sort) |
+            xargs -trn1 "$${gerrit[@]}" create-project --owner ${GERRIT_GROUP:?} --parent ${GERRIT_PERMISSIONS_REPO:?} --empty-commit
+        "$${gerrit[@]}" ls-projects
 
-        # B. MAKE IT MANDATORY (The Submit Requirement)
-        # This tells Gerrit: "You cannot submit unless Verified is at MAX (+1)"
-        git config -f project.config submit-requirement.Verified.description "CI Build must pass"
-        git config -f project.config submit-requirement.Verified.submittableIf "label:Verified=MAX"
-        git config -f project.config submit-requirement.Verified.canOverrideInChildProjects "true"
+        cd "$$(mktemp -d || :)"
+        git clone ssh://gerrit/${GERRIT_PERMISSIONS_REPO:?} .
+        git config user.name ${GERRIT_USER:?}
+        git config user.email ${GERRIT_USER:?}@localdomain
 
-        git config -f project.config label.GateKeeper.function "MaxWithBlock"
-        git config -f project.config label.GateKeeper.defaultValue "0"
-        git config -f project.config label.GateKeeper.value "-1 Blocked"
-        git config -f project.config label.GateKeeper.value "0 No score"
-        git config -f project.config label.GateKeeper.value "+1 Approved"
+        git config -f project.config submit.action 'rebase if necessary'
+        git config -f project.config --remove-section access.refs/heads/* || :
 
-        # B. MAKE IT MANDATORY
-        # This tells Gerrit: "You cannot submit unless GateKeeper is at MAX (+1)"
-        git config -f project.config submit-requirement.GateKeeper.description "Must be approved by GateKeeper"
-        git config -f project.config submit-requirement.GateKeeper.submittableIf "label:GateKeeper=MAX"
-        git config -f project.config submit-requirement.GateKeeper.canOverrideInChildProjects "true"
+        add-label() (git config -f project.config --add access.refs/heads/*.label-"$${1}" "$${2} group ${GERRIT_GROUP:?}")
+        declare -A labels
+        labels=(${GERRIT_LABELS:?})
+        # TODO: unify this and what's done in All-Projects/project.config
+        for label in "$${!labels[@]}"; do add-label "$${label}" "$${labels[$${label}]}"; done
+        cat project.config
+        ! git commit -am "update label perms" || git push origin HEAD:refs/meta/config
 
-        git config -f project.config submit-requirement.Code-Review.submittableIf "label:Code-Review=MAX"
-        git commit -am "Add labels and submitType for them" || true
-        git push origin HEAD:refs/meta/config
 volumes:
   gerrit_etc:
   gerrit_git:

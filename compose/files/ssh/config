@@ -1,0 +1,6 @@
+Host gerrit
+  HostName gerrit
+  User torii
+  Port 29418
+  StrictHostKeyChecking no
+  IdentityFile /root/.ssh/Torri_ed25519
