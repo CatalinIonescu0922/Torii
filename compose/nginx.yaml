@@ -16,7 +16,10 @@ services:
       start_period: 70s
 
     networks:
-      - torri
+      - torii
     depends_on:
       gerrit:
         condition: service_healthy
+      kafka-ui:
+        condition: service_started
+

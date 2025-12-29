@@ -4,13 +4,15 @@ services:
     pull_policy: build
     build:
       dockerfile_inline: | 
-        FROM gerritcodereview/gerrit:${GERRIT_VERSION}
+        FROM gerritcodereview/gerrit:${GERRIT_TAG}
         COPY --link --chown=1000:1000 --from=gerrit_config /etc/ /var/gerrit/etc/
         COPY --link --chown=1000:1000 --from=gerrit_config  --chmod=600 /ssh/ /var/gerrit/.ssh/
+        COPY --link --chown=1000:1000 --from=gerrit_config /etc/events-kafka.jar /var/gerrit/plugins/
+        COPY --link --chown=1000:1000 --from=gerrit_config /etc/events-broker.jar /var/gerrit/lib/
       additional_contexts:
         gerrit_config : files/gerrit/
     networks:
-      - torri
+      - torii
 
   gerrit-config:
     pull_policy : build
@@ -32,7 +34,7 @@ services:
       gerrit:
         condition: service_healthy
     networks:
-      - torri
+      - torii
 
   nginx:
     image: nginx:alpine
