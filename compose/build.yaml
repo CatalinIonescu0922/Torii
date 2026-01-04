@@ -7,8 +7,8 @@ services:
         FROM gerritcodereview/gerrit:${GERRIT_TAG}
         COPY --link --chown=1000:1000 --from=gerrit_config /etc/ /var/gerrit/etc/
         COPY --link --chown=1000:1000 --from=gerrit_config  --chmod=600 /ssh/ /var/gerrit/.ssh/
-        COPY --link --chown=1000:1000 --from=gerrit_config /etc/events-kafka.jar /var/gerrit/plugins/
-        COPY --link --chown=1000:1000 --from=gerrit_config /etc/events-broker.jar /var/gerrit/lib/
+        COPY --link --chown=1000:1000 --from=gerrit_config /plugins/events-kafka.jar /var/gerrit/plugins/
+        COPY --link --chown=1000:1000 --from=gerrit_config /plugins/events-broker.jar /var/gerrit/lib/
       additional_contexts:
         gerrit_config : files/gerrit/
     networks:
@@ -35,6 +35,15 @@ services:
         condition: service_healthy
     networks:
       - torii
+  kafka-config:
+    pull_policy: build
+    build:
+      dockerfile_inline: |
+        FROM alpine:${ALPINE_TAG}
+        RUN apk add --no-cache docker-cli bash
+    container_name: kafka-config
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
 
   nginx:
     image: nginx:alpine

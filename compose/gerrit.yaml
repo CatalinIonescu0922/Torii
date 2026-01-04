@@ -9,7 +9,8 @@ services:
       HTTPD_LISTEN_URL: proxy-http://*:8080/g/
     restart: unless-stopped
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
     volumes:
       - gerrit_git:/var/gerrit/git
       - gerrit_index:/var/gerrit/index
@@ -43,8 +44,6 @@ services:
             xargs -trn1 "$${gerrit[@]}" create-project --owner ${GERRIT_GROUP:?} --permissions-only
         comm -13 <("$${gerrit[@]}" ls-projects | sort) <(ls-projects | sort) |
             xargs -trn1 "$${gerrit[@]}" create-project --owner ${GERRIT_GROUP:?} --parent ${GERRIT_PERMISSIONS_REPO:?} --empty-commit
-        "$${gerrit[@]}" ls-projects
-        "$${gerrit[@]}" set-project --project ${GERRIT_PERMISSIONS_REPO} --add-permission 'push' --group ${GERRIT_GROUP} --ref 'refs/meta/config'
         cd "$$(mktemp -d || :)"
         git clone ssh://gerrit/${GERRIT_PERMISSIONS_REPO:?} .
         git config user.name ${GERRIT_USER:?}
@@ -59,7 +58,7 @@ services:
         # TODO: unify this and what's done in All-Projects/project.config
         for label in "$${!labels[@]}"; do add-label "$${label}" "$${labels[$${label}]}"; done
         cat project.config
-        ! git commit -am "update label perms" || git push origin HEAD:/refs/meta/config
+        ! git commit -am "update label perms" || git push origin HEAD:refs/meta/config
 
 volumes:
   gerrit_etc:
