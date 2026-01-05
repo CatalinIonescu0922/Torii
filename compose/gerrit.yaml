@@ -7,6 +7,7 @@ services:
     environment:
       CANONICAL_WEB_URL: http://gerrit:8080/g/
       HTTPD_LISTEN_URL: proxy-http://*:8080/g/
+      GERRIT_CONFIG_PLUGIN_EVENTS_KAFKA_SENDSTREAMEVENTS: "true"
     restart: unless-stopped
     depends_on:
       kafka:
@@ -16,6 +17,7 @@ services:
       - gerrit_index:/var/gerrit/index
       - gerrit_cache:/var/gerrit/cache
       - gerrit_plugins:/var/gerrit/plugins
+      # - ./files/gerrit/etc/gerrit.config:/var/gerrit/etc/gerrit.config:rw
     healthcheck:
       test: ["CMD-SHELL", "curl -svf --noproxy '*' http://${GERRIT_USER:?}@localhost:8080/g/login || exit 1"]
       interval: 10s
@@ -30,6 +32,9 @@ services:
       service: gerrit-config
     working_dir: /root
     entrypoint: ["bash", "-c"] 
+    depends_on:
+      gerrit:
+        condition: service_healthy
     command: 
       - | 
         set -uoe pipefail -x
@@ -52,6 +57,8 @@ services:
         git config -f project.config submit.action 'rebase if necessary'
         git config -f project.config --remove-section access.refs/heads/* || :
 
+        
+
         add-label() (git config -f project.config --add access.refs/heads/*.label-"$${1}" "$${2} group ${GERRIT_GROUP:?}")
         declare -A labels
         labels=(${GERRIT_LABELS:?})
@@ -59,7 +66,12 @@ services:
         for label in "$${!labels[@]}"; do add-label "$${label}" "$${labels[$${label}]}"; done
         cat project.config
         ! git commit -am "update label perms" || git push origin HEAD:refs/meta/config
-
+        # gerrit overrides the values of the events-kafka properties so i need to set them here 
+        docker exec -u gerrit gerrit \
+        git config -f /var/gerrit/etc/gerrit.config plugin.events-kafka.sendStreamEvents true
+        "$${gerrit[@]}" plugin reload events-kafka
+        # we need to perform a gerrit restart because a simple plugin reload is not enought 
+        docker restart gerrit
 volumes:
   gerrit_etc:
   gerrit_git:
