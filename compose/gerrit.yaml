@@ -7,7 +7,6 @@ services:
     environment:
       CANONICAL_WEB_URL: http://gerrit:8080/g/
       HTTPD_LISTEN_URL: proxy-http://*:8080/g/
-      GERRIT_CONFIG_PLUGIN_EVENTS_KAFKA_SENDSTREAMEVENTS: "true"
     restart: unless-stopped
     depends_on:
       kafka:
@@ -17,7 +16,6 @@ services:
       - gerrit_index:/var/gerrit/index
       - gerrit_cache:/var/gerrit/cache
       - gerrit_plugins:/var/gerrit/plugins
-      # - ./files/gerrit/etc/gerrit.config:/var/gerrit/etc/gerrit.config:rw
     healthcheck:
       test: ["CMD-SHELL", "curl -svf --noproxy '*' http://${GERRIT_USER:?}@localhost:8080/g/login || exit 1"]
       interval: 10s
@@ -39,7 +37,7 @@ services:
       - | 
         set -uoe pipefail -x
         gerrit=(docker exec -u root -i gerrit ssh -F /var/gerrit/.ssh/config self suexec --as ${GERRIT_USER:?} -- gerrit)
-        ls-projects() (yq '.projects[] | .name' /root/projects.yaml | grep -vF ^ | sed '/^---$/d')
+        ls-projects() (yq '.projects[].project | .name' /root/projects.yaml | grep -vF ^ | sed '/^---$/d')
         "$${gerrit[@]}" set-account --add-email ${GERRIT_USER:?}@localdomain \
                                     --http-password ${GERRIT_PASSWORD:?} \
                                     --add-ssh-key - self < /root/.ssh/authorized_keys

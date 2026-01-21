@@ -3,44 +3,81 @@
 
 projects:
   # Infrastructure
-  - name: infrastructure/terraform
-    description: "Infrastructure as Code with Terraform"
-    parent: All-Projects
-    branches:
-      - main
-      - develop
-    submit_type: MERGE_IF_NECESSARY
-    
+  - project:
+      name: infrastructure/terraform
+      branches:
+        - main
+        - develop
+      merge-mode: cherry-pick
+      check:
+        jobs:
+          - check-syntax
+          - unit-tests
+      gate:
+        jobs:
+          - unit-tests
+          - integration-tests
+
+
   # Backend Services
-  - name: services/api-gateway
-    description: "Main API Gateway service"
-    parent: All-Projects
-    branches:
-      - main
-      - develop
-    submit_type: REBASE_IF_NECESSARY
+  - project:
+      name: services/api-gateway
+      check:
+        jobs:
+          - check-syntax
+          - unit-tests
+      gate:
+        jobs:
+          - unit-tests
+          - integration-tests
+      merge-mode: cherry-pick
+      branches:
+        - main
+        - develop
     
-  - name: services/auth-service
-    description: "Authentication and authorization"
-    parent: All-Projects
-    branches:
-      - main
-      - develop
-    submit_type: REBASE_IF_NECESSARY
+  - project:
+      name: services/auth-service
+      check:
+        jobs:
+          - check-syntax
+          - unit-tests
+      gate:
+        jobs:
+          - unit-tests
+          - integration-tests
+      merge-mode: cherry-pick
+      branches:
+        - main
+        - develop
 
   # Shared Library
-  - name: libraries/common-utils
-    description: "Shared utilities library"
-    parent: All-Projects
-    branches:
-      - main
-    submit_type: MERGE_IF_NECESSARY
+  - project:
+      name: libraries/common-utils
+      check:
+        jobs:
+          - check-syntax
+          - unit-tests
+      gate:
+        jobs:
+          - unit-tests
+          - integration-tests
+      merge-mode: cherry-pick
+      branches:
+        - main
+        - ceva 
 
   # Frontend
-  - name: web/frontend-app
-    description: "Frontend web application"
-    parent: All-Projects
-    branches:
-      - main
-      - develop
-    submit_type: REBASE_IF_NECESSARY
+  - project:
+      name: web/frontend-app
+      check:
+        jobs:
+          - check-syntax
+          - unit-tests
+      gate:
+        jobs:
+          - unit-tests
+          - integration-tests
+      merge-mode: cherry-pick
+      branches:
+        - main
+        - develop
