@@ -1,5 +1,10 @@
 # Gerrit Project Layout Configuration
 # Test setup with a small set of projects
+filters:
+  event-filters:
+    event-type:
+      - ref-updated
+      - reviewer-added
 
 projects:
   # Infrastructure

@@ -34,11 +34,6 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-
-# ============================================================================
-# EVENT PROCESSOR
-# ============================================================================
-
 def process_gerrit_event(event_data: dict) -> Tuple[bool, Optional[str]]:
     """
     Main processing pipeline: Validation → Routing → Decision
@@ -105,7 +100,6 @@ def validate_event(event_data: dict):
         Validated Pydantic model or None
     """
     event_type = event_data.get("type")
-    
     # Map event types to Pydantic models
     event_models = {
         "patchset-created": PatchSetCreatedEvent,
@@ -116,6 +110,9 @@ def validate_event(event_data: dict):
     
     model_class = event_models.get(event_type)
     
+    if event_type == "ref-updated":
+        return None
+
     if not model_class:
         return None
     
@@ -124,11 +121,6 @@ def validate_event(event_data: dict):
     except ValidationError as e:
         logger.warning(f"Validation error for {event_type}: {e}")
         raise
-
-
-# ============================================================================
-# MAIN ENTRY POINT
-# ============================================================================
 
 def main():
     """Start the Events Consumer Intelligence Layer"""

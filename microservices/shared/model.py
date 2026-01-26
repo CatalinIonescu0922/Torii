@@ -75,11 +75,6 @@ class DraftPublishedEvent(BaseModel):
     uploader: Account
     eventCreatedOn: Optional[int] = None
 
-
-# ============================================================================
-# ROUTING DECISION ENUM
-# ============================================================================
-
 class RoutingDecision(BaseModel):
     """Handler decision output"""
     action: Literal["PROCESS", "IGNORE", "ERROR"]
@@ -91,8 +86,6 @@ class Project(BaseModel):
     name: str
     branches : list[str]
     merge_mode : str
-
-
 
 class Pipeline(BaseModel):
     pass
