@@ -9,6 +9,35 @@
 import voluptuous as V
 import yaml
 class ParseYamlFile:
+    # define schema available across all of the layouts
+
+    # base schemas used across all of the generating files 
+
+    def validatePipelinesInLayout()-> dict:
+        return None 
+    def createProjectSchema(self,list_of_pipelines: list , list_of_jobs : list , known_events : list) -> V.Schema:
+        event_type = {
+                V.Optional('event-type') : [V.In(known_events)]
+        }
+        project_detail_schema = {
+        V.Required('name') : str,
+        V.Required('branches') : [str],
+        V.Required('merge-mode') : V.Any('merge','rebase','cherry-pick'),
+        V.Optional(V.In(list_of_pipelines)) : {
+            V.Required('jobs') : [V.In(list_of_jobs)] 
+            }
+        }
+
+        projects_file_schema = V.Schema({
+            V.Optional('filters') : {
+                V.Optional('event-filters') : event_type
+            },
+            V.Required('projects') : [
+                { V.Required('project') : project_detail_schema }
+            ]
+        })
+        return projects_file_schema
+    
     def getYamlData(self,file_name : str) -> dict:
         try:
             with open(file_name , 'r') as yaml_file:
@@ -37,6 +66,7 @@ class ParseYamlFile:
     def checkDuplicate(self , data : list):
         # we know that here we receive a list of dict with the same first key
         # the value of the first key is all of the properties of the data beeing send 
+        # this will only raise if a duplicate if found
         duplicate = []
         seen = set()
         first_key = list(data[0])[0]
@@ -47,14 +77,15 @@ class ParseYamlFile:
                 duplicate.append(item[first_key]['name'])
         if duplicate:
             raise V.Invalid(f"foud this duplicated names {duplicate}")
-        return False
-        
+          
     def validateProjectFile(self ,data : dict) -> dict:
         projects = data.get('projects')
         try:
             self.checkDuplicate(projects)
+            schema = self.createProjectSchema(['check' , 'gate'] , ['check-syntax', 'unit-tests','integration-tests'],['reviewer-added', 'ref-updated'])
+            schema(data)
         except V.Invalid as E :
-            raise V.Invalid(f"{E} in project.yaml file ")
+            raise V.Invalid(f"{E} in projects.yaml file ")
         # here we know for sure no duplication name are present 
         # check the overwall structure of the file 
         
@@ -67,9 +98,9 @@ class ParseYamlFile:
     
 
 def main():
-    name = 'projects.yaml'
+    names = ['projects.yaml' , 'pipelines.yaml' , 'jobs.yaml']
     Parser = ParseYamlFile()
-    Parser.getYamlData(name)
+    Parser.getYamlData(names[0])
 
 if __name__ == '__main__':
     main()

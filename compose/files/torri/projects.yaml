@@ -5,7 +5,7 @@ filters:
     event-type:
       - ref-updated
       - reviewer-added
-
+      
 projects:
   # Infrastructure
   - project:
