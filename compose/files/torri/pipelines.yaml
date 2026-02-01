@@ -6,38 +6,62 @@ pipelines:
   - pipeline:
       name: check
       manager: independent
+      require:
+        open: true
+        current-patchset: true
+        approval:
+          - code-review: 2
+          - verified: 1
+      reject:
+        approval:
+          - integrated: [-2, -1]
+          - gatekeeper: 1
+
       trigger:
-        my_gerrit:
+        gerrit:
           - event: patchset-created
       success:
-        my_gerrit:
-          Verified: 1
+        gerrit:
+          - Verified: 1
       failure:
-        my_gerrit:
-          Verified: -1
+        gerrit:
+          - Verified: -1
 
   - pipeline:
       name: gate
       manager: dependent
+      require:
+        open: true
+        current-patchset: true
+        approval:
+          - code-review: 2
+          - verified: 1
+
       trigger:
-        my_gerrit:
+        gerrit:
           - event: patchset-created
       success:
-        my_gerrit:
-          Verified: 1
+        gerrit:
+          - Verified: 1
       failure:
-        my_gerrit:
-          Verified: -1  
+        gerrit:
+          - Verified: -1  
 
   - pipeline:
       name: post
+      require:
+        open: true
+        current-patchset: true
+        approval:
+          - code-review: 2
+          - verified: 1
       manager: independent
       trigger:
-        my_gerrit:
+        gerrit:
           - event: patchset-created
       success:
-        my_gerrit:
-          Verified: 1
+        gerrit:
+          - Verified: 1
       failure:
-        my_gerrit:
-          Verified: -1
+        gerrit:
+          - Verified: -1
