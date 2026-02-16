@@ -3,26 +3,36 @@
 # dependencies = [
 #     "voluptuous",
 #     "pyyaml",
+#     "pydantic"
 # ]
 # ///
 
 import voluptuous as V
 import yaml
 import os
+import sys
 from model import known_events , known_labels
-
+from pathlib import Path
 
 class Validator:
-    def getYamlData(self,file_name : str) -> dict:
+    @classmethod
+    def get_file_full_path(cls)-> Path:
+        main_file = sys.modules['__main__'].__file__
+        return Path(main_file).resolve().parent / 'config' / 'layout'
+
+    @classmethod
+    def getYamlData(cls,file_name : str) -> dict:
+        file_path = Validator.get_file_full_path() / file_name
         try:
-            with open(file_name , 'r') as yaml_file:
+            with open(file_path , 'r') as yaml_file:
                 yaml_data = yaml.full_load(yaml_file)
             return yaml_data
-        except FileNotFoundError :
-            print("the file was not found")
+        except FileNotFoundError as e:
+            raise FileNotFoundError(f"Could not find anything at this {file_path} path") from e
         except yaml.YAMLError as e:
-            print(f'This may not be a yaml file. {e}')
-    def checkDuplicate(self , data : list):
+            raise yaml.YAMLError("This may not be a yaml file") from e
+    @classmethod
+    def checkDuplicate(cls, data : list):
         duplicate = []
         seen = set()
         first_key = list(data[0])[0]
@@ -35,7 +45,8 @@ class Validator:
             raise V.Invalid(f"foud this duplicated names {duplicate}")
         return seen
     
-    def createProjectSchema(self,list_of_pipelines: list , list_of_jobs : list) -> V.Schema:
+    @classmethod
+    def createProjectSchema(cls,list_of_pipelines: list , list_of_jobs : list) -> V.Schema:
         event_type = {
                 V.Optional('event-type') : [V.In(known_events , msg="the event is not a known event")]
         }
@@ -58,7 +69,8 @@ class Validator:
         })
         return projects_file_schema
 
-    def createJobsSchema(self):
+    @classmethod
+    def createJobsSchema(cls):
         jobs_file_schema = V.Schema({
             V.Required('jobs') : [
                 {V.Required('job') : {
@@ -68,7 +80,8 @@ class Validator:
         })
         return jobs_file_schema
 
-    def createPipelinesSchema(self) -> V.Schema:
+    @classmethod
+    def createPipelinesSchema(cls) -> V.Schema:
         approval = {
             V.Optional(V.Any(V.In(known_labels), str)): V.Any(int , [int])
         }
@@ -110,34 +123,36 @@ class Validator:
             ]
         })
         return pipeline_file_schema
-    def validate(self ,data : dict, file_name : str, list_of_pipelines:list=None , list_of_jobs:list=None) -> dict:
+    @classmethod
+    def validate(cls,data : dict, file_name : str, list_of_pipelines:list=None , list_of_jobs:list=None) -> dict:
         # takes only the word before the . of the file_name
         resurce_name = os.path.splitext(file_name)[0]
         resurces = data.get(resurce_name)
         try:
-            names = self.checkDuplicate(resurces)
+            names = Validator.checkDuplicate(resurces)
             match resurce_name:
                 case 'projects':
-                    schema = self.createProjectSchema(list_of_pipelines , list_of_jobs)
+                    schema = Validator.createProjectSchema(list_of_pipelines , list_of_jobs)
                 case 'jobs':
-                    schema = self.createJobsSchema()
+                    schema = Validator.createJobsSchema()
                 case 'pipelines':
-                    schema = self.createPipelinesSchema()
+                    schema = Validator.createPipelinesSchema()
             schema(data)
             return data , names
         except V.Invalid as E :
             raise V.Invalid(f"{E} in {file_name} file ")
-    def validateAllFiles(self) :
+    @classmethod
+    def validateAllFiles(cls) :
         # the order of the files is like this jobs pipelines then projects 
         try:
-            jobs_data = self.getYamlData('jobs.yaml')
-            jobs_data , job_names = self.validate(jobs_data,'jobs.yaml')
+            jobs_data = Validator.getYamlData('jobs.yaml')
+            jobs_data , job_names = Validator.validate(jobs_data,'jobs.yaml')
 
-            pipelines_data = self.getYamlData('pipelines.yaml')
-            pipelines_data , pipeline_names = self.validate(pipelines_data,'pipelines.yaml')
+            pipelines_data = Validator.getYamlData('pipelines.yaml')
+            pipelines_data , pipeline_names = Validator.validate(pipelines_data,'pipelines.yaml')
 
-            projects_data = self.getYamlData('projects.yaml')
-            projects_data, project_names = self.validate(projects_data,'projects.yaml',list_of_pipelines=pipeline_names ,list_of_jobs=job_names)
+            projects_data = Validator.getYamlData('projects.yaml')
+            projects_data, project_names = Validator.validate(projects_data,'projects.yaml',list_of_pipelines=pipeline_names ,list_of_jobs=job_names)
 
             return {
                 "jobs_data" : jobs_data,
@@ -150,11 +165,3 @@ class Validator:
             
         except Exception:
             raise 
-
-def main():
-    Validatorul = Validator()
-    Validatorul.validateAllFiles()
-    # the names of the yaml files 
-
-if __name__ == '__main__':
-    main()
