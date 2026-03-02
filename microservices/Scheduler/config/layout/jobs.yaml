@@ -1,0 +1,17 @@
+# Jenkins Job Definitions
+# Simple test jobs for demo
+
+jobs:
+  - job:
+      name: verify-terraform
+  - job:
+      name: merge-terraform
+  - job:
+      name: verify-api-gateway
+  - job:
+      name: unit-tests
+  - job:
+      name: check-syntax
+  - job:
+      name: integration-tests
+

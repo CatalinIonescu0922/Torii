@@ -1,0 +1,56 @@
+version: 1
+disable_existing_loggers: false
+
+formatters:
+  detailed:
+    format: '%(asctime)s.%(msecs)03d | %(name)-30s | %(levelname)-8s | %(funcName)-20s:%(lineno)-4d | %(message)s'
+    datefmt: '%Y-%m-%d %H:%M:%S'
+  
+  simple:
+    format: '%(asctime)s | %(levelname)-8s | %(name)s | %(message)s'
+    datefmt: '%H:%M:%S'
+  
+  json:
+    class: pythonjsonlogger.jsonlogger.JsonFormatter
+    format: '%(asctime)s %(name)s %(levelname)s %(funcName)s %(lineno)d %(message)s'
+
+handlers:
+  console:
+    class: logging.StreamHandler
+    level: DEBUG
+    formatter: simple
+    stream: ext://sys.stdout
+  
+  file_main:
+    class: logging.handlers.RotatingFileHandler
+    level: DEBUG
+    formatter: detailed
+    filename: logs/server-debug.log
+    maxBytes: 10485760
+    backupCount: 5
+    encoding: utf8
+
+loggers:
+  Scheduler:
+    level: DEBUG
+    handlers: [file_main]
+    propagate: false
+  
+  confluent_kafka:
+    level: WARNING
+    handlers: [console, file_main]
+    propagate: false
+  
+  kafka:
+    level: WARNING
+    handlers: [console, file_main]
+    propagate: false
+  
+  pydantic:
+    level: INFO
+    handlers: [console]
+    propagate: false
+
+root:
+  level: DEBUG
+  handlers: [console, file_main]

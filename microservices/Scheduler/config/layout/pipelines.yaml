@@ -1,0 +1,67 @@
+# Pipeline Definitions
+# Simple test pipelines for demo/development
+
+pipelines:
+  # Basic verification pipeline
+  - pipeline:
+      name: check
+      manager: independent
+      require:
+        open: true
+        current-patchset: true
+        approval:
+          - code-review: 2
+          - verified: 1
+      reject:
+        approval:
+          - integrated: [-2, -1]
+          - gatekeeper: 1
+
+      trigger:
+        gerrit:
+          - event: patchset-created
+      success:
+        gerrit:
+          - Verified: 1
+      failure:
+        gerrit:
+          - Verified: -1
+
+  - pipeline:
+      name: gate
+      manager: dependent
+      require:
+        open: true
+        current-patchset: true
+        approval:
+          - code-review: 2
+          - verified: 1
+
+      trigger:
+        gerrit:
+          - event: patchset-created
+      success:
+        gerrit:
+          - Verified: 1
+      failure:
+        gerrit:
+          - Verified: -1  
+
+  - pipeline:
+      name: post
+      require:
+        open: true
+        current-patchset: true
+        approval:
+          - code-review: 2
+          - verified: 1
+      manager: independent
+      trigger:
+        gerrit:
+          - event: patchset-created
+      success:
+        gerrit:
+          - Verified: 1
+      failure:
+        gerrit:
+          - Verified: -1

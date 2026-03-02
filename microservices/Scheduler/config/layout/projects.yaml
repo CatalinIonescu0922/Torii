@@ -1,0 +1,88 @@
+# Gerrit Project Layout Configuration
+# Test setup with a small set of projects
+filters:
+  event-filters:
+    event-type:
+      - ref-updated
+      - reviewer-added
+      
+projects:
+  # Infrastructure
+  - project:
+      name: infrastructure/terraform
+      branches:
+        - main
+        - develop
+      merge-mode: cherry-pick
+      check:
+        jobs:
+          - check-syntax
+          - unit-tests
+      gate:
+        jobs:
+          - unit-tests
+          - integration-tests
+
+
+  # Backend Services
+  - project:
+      name: services/api-gateway
+      check:
+        jobs:
+          - check-syntax
+          - unit-tests
+      gate:
+        jobs:
+          - unit-tests
+          - integration-tests
+      merge-mode: cherry-pick
+      branches:
+        - main
+        - develop
+    
+  - project:
+      name: services/auth-service
+      check:
+        jobs:
+          - check-syntax
+          - unit-tests
+      gate:
+        jobs:
+          - unit-tests
+          - integration-tests
+      merge-mode: cherry-pick
+      branches:
+        - main
+        - develop
+
+  # Shared Library
+  - project:
+      name: libraries/common-utils
+      check:
+        jobs:
+          - check-syntax
+          - unit-tests
+      gate:
+        jobs:
+          - unit-tests
+          - integration-tests
+      merge-mode: cherry-pick
+      branches:
+        - main
+        - ceva 
+
+  # Frontend
+  - project:
+      name: web/frontend-app
+      check:
+        jobs:
+          - check-syntax
+          - unit-tests
+      gate:
+        jobs:
+          - unit-tests
+          - integration-tests
+      merge-mode: cherry-pick
+      branches:
+        - main
+        - develop

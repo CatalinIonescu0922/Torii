@@ -1,0 +1,12 @@
+# Add to .gitignore - prevents log files from being committed
+
+# Log files
+logs/*.log
+logs/*.log.*
+
+# But keep the directory
+!logs/.gitkeep
+!logs/.gitignore
+.env
+__pychache__/
+.venv/
