@@ -10,3 +10,5 @@ logs/*.log.*
 .env
 __pychache__/
 .venv/
+ephemeral/*
+*.md
