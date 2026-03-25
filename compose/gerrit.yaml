@@ -11,6 +11,8 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+    ports:
+      - 8080:8080
     volumes:
       - gerrit_git:/var/gerrit/git
       - gerrit_index:/var/gerrit/index

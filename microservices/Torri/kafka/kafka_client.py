@@ -1,19 +1,12 @@
 import json
 import os
-from pathlib import Path
-from typing import Callable, Optional
-from dotenv import load_dotenv
-from confluent_kafka import Consumer, KafkaException, KafkaError
-from pydantic import ValidationError
-from pathlib import Path
-from shared.logger_setup import get_logger , setup_logging
-
-config_path = Path("/home/cata/Desktop/Torii/microservices/Scheduler/config/log/main_logging.yaml")
-work_dir = Path("/home/cata/Desktop/Torii/microservices/Scheduler/")
-setup_logging(config_path , work_dir)
-load_dotenv()
-
-class KafkaConnection:
+import threading
+from typing import Optional
+from confluent_kafka import Consumer, KafkaError
+from shared.logger_setup import get_logger
+from queue import Queue
+from typing import Any
+class KafkaConnection(threading.Thread):
     """
     Keeps a running connection with Kafka
     reads any incomming messages and sends them to the approapiate structures 
@@ -21,9 +14,10 @@ class KafkaConnection:
     logger = get_logger("Scheduler.kafka_connection")
     
     def __init__(self):
+        super().__init__(name="KafkaConnection", daemon=True)
         self.consumer: Optional[Consumer] = None
         self.running = False
-        
+        self.event_queue = Queue(0)
         # Consumer configuration
         self.consumer_config = {
             'bootstrap.servers': os.getenv("KAFKA_SERVER", "localhost:90977"),
@@ -36,17 +30,30 @@ class KafkaConnection:
         self.input_topic = os.getenv("KAFKA_INPUT_TOPIC", "gerrit-events")
 
     def connect(self):
-        """Establish connection to Kafka"""
+        """Establish connection to Kafka and start background consumption."""
+        if self.running:
+            self.logger.warning("Kafka consumer thread is already running")
+            return
+
         try:
             self.consumer = Consumer(self.consumer_config)
             self.consumer.subscribe([self.input_topic])
             self.running = True
             self.logger.info("Connected to Kafka, subscribed to %s", self.input_topic)
+            self.start()
         except Exception as e:
             self.logger.error("Failed to connect to Kafka: %s", e, exc_info=True)
+            self.running = False
             raise
+
+    def run(self):
+        """Thread entrypoint for the Kafka polling loop."""
+        try:
+            self.get_events()
+        finally:
+            self._close_consumer()
     
-    def consume_and_process(self, process_callback: Callable[[dict], tuple[bool, Optional[str]]]):
+    def get_events(self):
         """
         Main consumption loop with manual commit.
         """
@@ -54,7 +61,7 @@ class KafkaConnection:
             raise RuntimeError("Consumer not initialized. Call connect() first.")
         
         self.logger.info("Starting event consumption loop...")
-        
+        # creates the queue of events make the queue infinite 
         try:
             while self.running:
                 # Poll for messages
@@ -64,34 +71,63 @@ class KafkaConnection:
                     continue
                 
                 if msg.error():
-                    if msg.error().code() == KafkaError._PARTITION_EOF:
+                    error = msg.error()
+                    partition_eof = getattr(KafkaError, "_PARTITION_EOF", None)
+                    if error is not None and partition_eof is not None and error.code() == partition_eof:
                         self.logger.debug("Reached end of partition")
                         continue
                     else:
-                        self.logger.error("Kafka error: %s", msg.error())
+                        self.logger.error("Kafka error: %s", error)
                         continue
-                
+
                 # Deserialize message
                 try:
-                    raw_data = msg.value().decode('utf-8')
+                    payload = msg.value()
+                    if payload is None:
+                        self.logger.warning("Received empty payload from Kafka")
+                        self.consumer.commit()  # Commit to skip bad message
+                        continue
+
+                    raw_data = payload.decode('utf-8')
                     event_data = json.loads(raw_data)
+                    self.event_queue.put(event_data)
+                    self.logger.debug(f"Received data from kafka with this data {event_data}")
                 except (UnicodeDecodeError, json.JSONDecodeError) as e:
                     self.logger.error("Failed to decode message: %s", e)
                     self.consumer.commit()  # Commit to skip bad message
                     continue
         except KeyboardInterrupt:
             self.logger.info("Received shutdown signal")
-        finally:
-            self.shutdown()
-    
-    def shutdown(self):
-        """Graceful shutdown"""
-        self.logger.info("Shutting down Kafka client...")
-        self.running = False
+
+    def get_event_queue(self) -> Queue:
+        """Return the shared queue populated by the Kafka polling thread."""
+        return self.event_queue
+    def getEvent(self) -> dict[str, Any]:
+        return self.event_queue.get()
+
+    def eventDone(self):
+        self.event_queue.task_done()
+        self.consumer.commit()
         
+    def addEvent(self, data):
+        self.event_queue.put(data)
+
+    def _close_consumer(self):
+        """Close consumer handle if present."""
         if self.consumer:
             self.consumer.close()
+            self.consumer = None
             self.logger.info("✓ Consumer closed")
+    
+    def shutdown(self, wait: bool = True, timeout: Optional[float] = None):
+        """Graceful shutdown for background Kafka polling."""
+        self.logger.info("Shutting down Kafka client...")
+        self.running = False
+
+        if wait and self.is_alive() and threading.current_thread() is not self:
+            self.join(timeout=timeout)
+        else:
+            self._close_consumer()
 
 if __name__ == '__main__':
     kafka = KafkaConnection()

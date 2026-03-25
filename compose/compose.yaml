@@ -1,4 +1,4 @@
-
+name: torri-compose
 include:
   - env_file: ./default.env
     path:

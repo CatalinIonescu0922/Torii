@@ -1,0 +1,19 @@
+[project]
+name = "shared"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "CatalinIonescu0922", email = "cata.ionescu2003@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.12.5",
+    "python-json-logger>=4.0.0",
+    "pyyaml>=6.0.3",
+    "voluptuous>=0.16.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.22,<0.10.0"]
+build-backend = "uv_build"

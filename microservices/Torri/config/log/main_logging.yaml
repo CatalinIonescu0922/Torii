@@ -21,7 +21,7 @@ handlers:
     formatter: simple
     stream: ext://sys.stdout
   
-  file_main:
+  server-debug:
     class: logging.handlers.RotatingFileHandler
     level: DEBUG
     formatter: detailed
@@ -30,20 +30,30 @@ handlers:
     backupCount: 5
     encoding: utf8
 
-loggers:
-  Scheduler:
+  extra-debug:
+    class: logging.handlers.RotatingFileHandler
     level: DEBUG
-    handlers: [file_main]
+    formatter: detailed
+    filename: ephemeral/log/extra-debug.log
+    encoding: utf8
+
+loggers:
+  torri:
+    level: DEBUG
+    handlers: [server-debug]
     propagate: false
-  
+  torri-extra:
+    level: DEBUG
+    handlers: [extra-debug]
+    propagate: false
   confluent_kafka:
     level: WARNING
-    handlers: [console, file_main]
+    handlers: [console, server-debug]
     propagate: false
   
   kafka:
     level: WARNING
-    handlers: [console, file_main]
+    handlers: [console, server-debug]
     propagate: false
   
   pydantic:
@@ -53,4 +63,4 @@ loggers:
 
 root:
   level: DEBUG
-  handlers: [console, file_main]
+  handlers: [console, server-debug]
