@@ -1,12 +1,7 @@
-from dataclasses import dataclass
-from typing import Optional, List, Literal
-from datetime import datetime
-
-
 known_events = [
     'patchset-created', 'comment-added', 'change-merged', 
     'change-abandoned', 'change-restored', 'ref-updated', 
-    'reviewer-added', 'wip-state-changed', 'private-state-changed'
+    'wip-state-changed', 'private-state-changed'
 ]
 
 known_labels = [
@@ -14,67 +9,87 @@ known_labels = [
 ]
 
 
-class GerritChange():
+class GerritChange:
     """Gerrit change information"""
-    def __init__(self) -> None:
-        self.project: str = ""
-        self.branch: str = ""
-        self.id: str = ""
-        self.number: int = 0
-        self.subject: str = ""
-        self.url: str = "" 
-        self.commitMessage: str = ""
-        self.createdOn: int = 0
-        self.status: str = ""
-        self.wip: bool = False
-        self.private: bool = False
-        self.needs_changes: list = []
-        self.needed_by_changes: list = []
-        self.author: str = ""
+    def __init__(self):
+        self.base_url = ""
+        self.project = ""
+        self.branch = ""
+        self.id = ""
+        self.number = 0
+        self.patchset = 0
+        self.current_revision = {}
+        self.subject = ""
+        self.url = ""
+        self.submit_type = ""
+        self.status = ""
+        self.wip = False
+        self.private = False
+        self.needs_changes = []
+        self.needed_by_changes = []
+        self.author = ""
 
-@dataclass(slots=True)
+    def update(self, data):
+        revisions = data.get("revisions", {})
+        current_revision_id = data.get("current_revision")
+        if current_revision_id is not None:
+            self.current_revision = revisions.get(current_revision_id, {})
+            patchset_number = self.current_revision.get("_number")
+            if patchset_number is not None:
+                self.patchset = int(patchset_number)
+
+        self.project = str(data.get("project", ""))
+        self.branch = str(data.get("branch", ""))
+        self.id = str(data.get("id", ""))
+        self.number = int(data.get("_number", 0))
+        self.subject = str(data.get("subject", ""))
+        self.status = str(data.get("status", ""))
+        self.submit_type = str(data.get("submit_type", ""))
+        self.wip = bool(data.get("work_in_progress", False))
+        self.private = bool(data.get("private", False))
+        owner = data.get("owner", {})
+        self.author = str(owner.get("name", ""))
+        self.url = ('%s/c/%s/+/%s' % (self.base_url , self.project , self.number))
+        
+    def __repr__(self):
+        return '<Change 0x%x %s %s>' % (id(self) , self.project ,self.number)
+
+
 class GerritTriggerEvent:
     """An event that can trigger a zuul pipeline run"""
     def __init__(self):
-        self.data = None
-        # common
-        self.type = None
-        self.project_name = None
-        self.trigger_name = None
+        self.data = {}
+        self.type = ""
+        self.project_name = ""
+        self.trigger_name = ""
         self.event_handle_time = None
-        # Representation of the user account that performed the event.
-        self.account = None
-        # patchset-created, comment-added, etc.
-        self.change_number = None
-        self.change_url = None
-        self.patch_number = None
-        self.refspec = None
+        self.account = {}
+        self.change_number = ""
+        self.change_url = ""
+        self.patch_number = ""
+        self.refspec = ""
         self.approvals = []
-        self.branch = None
-        self.comment = None
-        # ref-updated
-        self.ref = None
-        self.oldrev = None
-        self.newrev = None
-        # timer
-        self.timespec = None
-        # zuultrigger
-        self.pipeline_name = None
-        # For events that arrive with a destination pipeline (eg, from
-        # an admin command, etc):
+        self.branch = ""
+        self.comment = ""
+        self.ref = ""
+        self.oldrev = ""
+        self.newrev = ""
+        self.timespec = ""
+        self.pipeline_name = ""
         self.query_future = None
         self.source = None
+        self.change_details = None
 
 
 
-class Project():
+class Project:
     name: str
     branches : list[str]
     merge_mode : str
 
-class Pipeline():
+class Pipeline:
     pass
 
 
-class Job():
+class Job:
     pass

@@ -45,3 +45,4 @@ class BaseConnection(metaclass=abc.ABCMeta):
     def __repr__(self):
         return '<Connection 0x%x %s %s>' % (id(self), self.connection_name, getattr(self, 'driver_name', ''))
 
+
