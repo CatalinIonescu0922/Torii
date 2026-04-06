@@ -85,6 +85,77 @@ class GerritEventProcessor(threading.Thread):
             finally:
                 self.kafka_connection.eventDone()
 
+class ChangeNetworkManager:
+    """Ensures only one thread fetches a given change over the network at a time.
+
+    Tracks a wait graph to detect circular dependencies before blocking.
+    Stores the in-flight GerritChange object so same-thread re-entry (via
+    needs_changes / needed_by_changes resolution) returns the partial object
+    immediately instead of deadlocking.
+    """
+
+    def __init__(self):
+        self._active = {}   # change_number -> (Event, owner_thread_id, GerritChange | None)
+        self._waiting = {}  # thread_id -> change_number it is blocked on
+        self._lock = threading.Lock()
+
+    def begin(self, change_number):
+        """
+        Returns ('fetch', None)      — this thread should go to the network.
+        Returns ('wait', event)      — another thread is fetching; caller should block.
+        Returns ('inflight', obj)    — same-thread re-entry or cross-thread cycle;
+                                       return the partial GerritChange immediately.
+        """
+        tid = threading.current_thread().ident
+        with self._lock:
+            if change_number not in self._active:
+                self._active[change_number] = (threading.Event(), tid, None)
+                return 'fetch', None
+            event, owner, inflight = self._active[change_number]
+            if owner == tid:
+                return 'inflight', inflight
+            self._waiting[tid] = change_number
+            if self._has_cycle(change_number, tid):
+                del self._waiting[tid]
+                return 'inflight', inflight
+            return 'wait', event
+
+    def register(self, change_number, change_obj):
+        with self._lock:
+            if change_number in self._active:
+                event, tid, _ = self._active[change_number]
+                self._active[change_number] = (event, tid, change_obj)
+
+    def end_wait(self):
+        tid = threading.current_thread().ident
+        with self._lock:
+            self._waiting.pop(tid, None)
+
+    def finish(self, change_number):
+        with self._lock:
+            entry = self._active.pop(change_number, None)
+        if entry:
+            event, _, _ = entry
+            event.set()
+
+    def _has_cycle(self, start_change, requesting_tid):
+        visited = set()
+        current = start_change
+        while True:
+            if current in visited:
+                return True
+            visited.add(current)
+            entry = self._active.get(current)
+            if entry is None:
+                return False
+            _, owner, _ = entry
+            if owner == requesting_tid:
+                return True
+            current = self._waiting.get(owner)
+            if current is None:
+                return False
+
+
 class GerritRestConnection(BaseConnection):
     """REST client for querying Gerrit changes."""
     logger = get_logger("torri.connection.gerrit")
@@ -98,8 +169,7 @@ class GerritRestConnection(BaseConnection):
             self.session.auth = auth
         self.change_cache_rest_api = LRUCache(maxsize=self.GERRIT_CHANGE_CACHE_SIZE)
         self.cache_lock = threading.RLock()
-        self._change_update_locks = {}
-        self._change_update_locks_guard = threading.RLock()
+        self._network_manager = ChangeNetworkManager()
         self.executor = ThreadPoolExecutor(max_workers=5)
 
     def query(self, change_number):
@@ -110,22 +180,18 @@ class GerritRestConnection(BaseConnection):
         endpoint = ('changes/%s?o=DETAILED_ACCOUNTS&o=CURRENT_REVISION&'
             'o=CURRENT_COMMIT&o=CURRENT_FILES&o=LABELS&'
             'o=DETAILED_LABELS&o=ALL_REVISIONS' % (change_number,))
-        # implementing a retry for the query process in case the query failed
-        number_of_retrys = 4
-        for i in range(1 ,number_of_retrys):
+        number_of_retries = 3
+        for attempt in range(number_of_retries):
             try:
                 data = self._get(endpoint)
-                # note this query return only the open dependecies 
-                # for the merge dependecies i should extract it from the data 
                 related = self._get('changes/%s/revisions/%s/related' % (
-                            change_number, data['current_revision']))
-                return data , related
+                    change_number, data['current_revision']))
+                return data, related
             except Exception as e:
-                if i < 3:
-                    self.logger.info(f"Querying gerrit failed on {i} try will retry {number_of_retrys - 1} times ")
+                if attempt < number_of_retries - 1:
+                    self.logger.info(f"Querying gerrit failed on attempt {attempt + 1}, retrying...")
                     continue
                 raise GerritQueryError(f"Failed to query Gerrit change {change_number}") from e
-        raise GerritQueryError(f"Failed to query Gerrit change {change_number}")
 
     # --- private helpers ---
 
@@ -149,26 +215,24 @@ class GerritRestConnection(BaseConnection):
     def _change_key(self, change_number, change_patchset=None):
         return (str(change_number), None if change_patchset is None else str(change_patchset))
 
-    def _get_change_update_lock(self, change_number):
-        change_id = str(change_number)
-        with self._change_update_locks_guard:
-            lock = self._change_update_locks.get(change_id)
-            if lock is None:
-                lock = threading.Lock()
-                self._change_update_locks[change_id] = lock
-            return lock
-
-    def getChange(self, change_number, change_patchset=None, refresh=False, history=None):
-        return self._getChange(change_number, change_patchset, refresh=refresh, history=history)
-
     def _getChange(self, change_number, change_patchset=None, refresh=False, history=None):
         key = self._change_key(change_number, change_patchset)
+
         change = self.getChangeFromCache(key)
         if change is not None and not refresh:
             return change
 
-        lock = self._get_change_update_lock(change_number)
-        with lock:
+        should_fetch, payload = self._network_manager.begin(str(change_number))
+        if should_fetch == 'inflight':
+            self.logger.warning("Circular dependency on change %s, returning in-flight object.", change_number)
+            return payload or self.getChangeFromCache(key)
+        if should_fetch == 'wait':
+            payload.wait()
+            self._network_manager.end_wait()
+            return self.getChangeFromCache(key)
+
+        # should_fetch == 'fetch'
+        try:
             change = self.getChangeFromCache(key)
             if change is not None and not refresh:
                 return change
@@ -177,9 +241,12 @@ class GerritRestConnection(BaseConnection):
                 change = GerritChange()
                 self.addChangeToCache(key, change)
 
+            self._network_manager.register(str(change_number), change)
             return self._updateChange(change, change_number, change_patchset, history=history)
+        finally:
+            self._network_manager.finish(str(change_number))
 
-    def _prepareDependencyListFromHttp(self, related , current_revision , change_number):
+    def _prepareDependencyListFromHttp(self, related, current_revision, change_number):
         depends_on = None
         needed_by_changes = []
         for change in related["changes"]:
@@ -187,45 +254,43 @@ class GerritRestConnection(BaseConnection):
                 parent = change["commit"]["parents"][0]["commit"]
                 for change in related["changes"]:
                     if change["commit"]["commit"] == parent:
-                        depends_on = (change["_change_number"] , change["_current_revision_number"])
+                        depends_on = (change["_change_number"], change["_current_revision_number"])
                     elif change["_change_number"] > change_number:
-                        needed_by_changes.append((change["_change_number"] , change["_current_revision_number"]))
-        return depends_on , needed_by_changes
-
-    def _updateChangeDependecies(self):
-        print("altceva")
+                        needed_by_changes.append((change["_change_number"], change["_current_revision_number"]))
+        return depends_on, needed_by_changes
 
     def _updateChange(self, change, change_number, change_patchset, history=None):
         if history is None:
             history = []
-        history = history[:]
-        result = self.query(change_number)
-        if result is None:
-            raise GerritQueryError(f"Failed to query Gerrit change {change_number}")
-        data, related = result
+        history = history + [str(change_number)]
+
+        data, related = self.query(change_number)
+        change.update(data)
+
+        try:
+            dependency_number = int(change_number)
+        except (TypeError, ValueError):
+            dependency_number = change_number
+
+        depends_on, needed_by = self._prepareDependencyListFromHttp(
+            related, data.get("current_revision"), dependency_number
+        )
+
+        change.needs_changes = []
+        if depends_on:
+            dep_num, dep_patchset = depends_on
+            if str(dep_num) not in history:
+                change.needs_changes = [self._getChange(dep_num, dep_patchset, history=history)]
+
+        change.needed_by_changes = []
+        for nb_num, nb_patchset in needed_by:
+            if str(nb_num) not in history:
+                change.needed_by_changes.append(self._getChange(nb_num, nb_patchset, history=history))
+
         with self.cache_lock:
-            # this updates the change own data 
-            change.update(data)
-
-            dependency_change_number = change_number
-            try:
-                dependency_change_number = int(change_number)
-            except (TypeError, ValueError):
-                pass
-
-            depends_on, needed_by_changes = self._prepareDependencyListFromHttp(
-                related,
-                data.get("current_revision"),
-                dependency_change_number,
-            )
-            change.needs_changes = [depends_on] if depends_on else []
-            change.needed_by_changes = needed_by_changes
-
-            cache_key = self._change_key(change_number, change_patchset)
-            self.change_cache_rest_api[cache_key] = change
+            self.change_cache_rest_api[self._change_key(change_number, change_patchset)] = change
 
         return change
-
 
     def addChangeToCache(self, key, value):
         with self.cache_lock:
