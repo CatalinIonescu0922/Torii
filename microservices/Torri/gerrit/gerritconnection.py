@@ -57,32 +57,44 @@ class GerritEventProcessor(threading.Thread):
     def _handle_event(self, data):
         event = self._build_event(data)
         if event is None:
-            return False, None
+            self.kafka_connection.eventDone()
+            return
 
         if event.change_number:
-            try:
-                event.change_details = self.gerrit_connection.getChange(event.change_number)
-            except Exception as exc:
-                self.logger.error("Failed to enrich Gerrit event for change %s: %s", event.change_number, exc, exc_info=True)
-                return False, None
+            future = self.gerrit_connection.executor.submit(
+                self.gerrit_connection.getChange, event.change_number
+            )
+            future.add_done_callback(lambda f: self._on_enrichment_done(f, event))
+        else:
+            self._dispatch_event(event)
+            self.kafka_connection.eventDone()
 
-        return True, event
+    def _on_enrichment_done(self, future, event):
+        try:
+            event.change_details = future.result()
+            self._dispatch_event(event)
+        except Exception as exc:
+            self.logger.error(
+                "Failed to enrich event for change %s: %s",
+                event.change_number, exc, exc_info=True
+            )
+        finally:
+            self.kafka_connection.eventDone()
+
+    def _dispatch_event(self, event):
+        self.gerrit_connection.sched.addEvent(event)
 
     def run(self) -> None:
         while not self._stopped:
-            data = None
             try:
                 data = self.kafka_connection.getEvent(timeout=1.0)
-
-                handled, event = self._handle_event(data)
-                if handled:
-                    self.gerrit_connection.sched.addEvent(event)
-                self.kafka_connection.addEvent(event)
+                if data is None:
+                    continue
+                self._handle_event(data)
             except Empty:
                 continue
             except Exception:
-                self.kafka_connection.eventDone()
-            finally:
+                self.logger.exception("Unexpected error in event loop")
                 self.kafka_connection.eventDone()
 
 class ChangeNetworkManager:
@@ -193,7 +205,10 @@ class GerritRestConnection(BaseConnection):
                     continue
                 raise GerritQueryError(f"Failed to query Gerrit change {change_number}") from e
 
-    # --- private helpers ---
+    def getChange(self, change_number, change_patchset=None, refresh=False, history=None):
+        return self._getChange(change_number, change_patchset, refresh, history)
+
+    # --- helpers ---
 
     def _get(self, endpoint):
         url = self._build_url(endpoint)
@@ -267,10 +282,7 @@ class GerritRestConnection(BaseConnection):
         data, related = self.query(change_number)
         change.update(data)
 
-        try:
-            dependency_number = int(change_number)
-        except (TypeError, ValueError):
-            dependency_number = change_number
+        dependency_number = int(change_number)
 
         depends_on, needed_by = self._prepareDependencyListFromHttp(
             related, data.get("current_revision"), dependency_number
