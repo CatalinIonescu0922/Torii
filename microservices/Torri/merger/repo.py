@@ -1,0 +1,143 @@
+import os
+import shutil
+import time
+import subprocess
+from typing import Dict, List, Optional
+import threading
+from shared.logger_setup import get_logger
+from torri.merger.utils import git_timeout_handler, build_git_env
+from torri.merger.ssh_utils import ensure_known_hosts
+
+class GitCommandError(Exception):
+    pass
+
+class Repo:
+    """
+    Phase 2: Repository Abstraction.
+    Wraps single Git repositories heavily optimizing for stateless execution.
+    """
+    def __init__(self, workspace_root: str, repo_name: str, remote_url: str):
+        self.workspace_root = workspace_root
+        self.repo_name = repo_name
+        self.remote_url = remote_url
+        self.repo_dir = os.path.join(self.workspace_root, repo_name)
+        self._lock = threading.RLock()
+        self.env = build_git_env()
+        self.logger = get_logger("torri.merger.repo", job_id=self.repo_name)
+
+    def _run_git(self, args: List[str], timeout: int = 120, check: bool = True) -> subprocess.CompletedProcess:
+        """Safely executes git command respecting the Phase 1 Timeout handlers."""
+        cmd = ['git'] + args
+        cwd = self.repo_dir if os.path.exists(self.repo_dir) else None
+        
+        with git_timeout_handler(self.repo_dir, timeout=timeout):
+            result = subprocess.run(
+                cmd, cwd=cwd, env=self.env, timeout=timeout,
+                capture_output=True, text=True
+            )
+            if check and result.returncode != 0:
+                # E.g. .git/index.lock exists errors
+                if "index.lock" in result.stderr:
+                    self.logger.warning("Detected locked index. Force purging corruption.")
+                    shutil.rmtree(self.repo_dir, ignore_errors=True)
+                raise GitCommandError(f"Git command {' '.join(args)} failed: {result.stderr}")
+            return result
+
+    def _apply_aggressive_gc(self):
+        """Aggressive Garbage Collection: prevents background Git GC from corrupting synthetic refs."""
+        self._run_git(['config', 'gc.autoDetach', 'false'])
+        self._run_git(['config', 'gc.pruneExpire', 'now'])
+        self._run_git(['config', 'gc.reflogExpire', 'now'])
+
+    def initialize(self, sparse_paths: Optional[List[str]] = None):
+        """Dynamic Cloning & Sparse Checkout Initialization."""
+        with self._lock:
+            if not os.path.exists(os.path.join(self.repo_dir, ".git")):
+                ensure_known_hosts(self.remote_url)
+                os.makedirs(self.repo_dir, exist_ok=True)
+                self._run_git(['init'], cwd=self.repo_dir)
+                self._run_git(['remote', 'add', 'origin', self.remote_url])
+                
+                self._apply_aggressive_gc()
+
+                if sparse_paths:
+                    self.logger.info("Applying sparse checkouts to %s", sparse_paths)
+                    self._run_git(['config', 'core.sparseCheckout', 'true'])
+                    sparse_file = os.path.join(self.repo_dir, '.git', 'info', 'sparse-checkout')
+                    with open(sparse_file, 'w') as f:
+                        f.write("\n".join(sparse_paths) + "\n")
+
+                self._git_fetch_with_backoff("refs/heads/*:refs/remotes/origin/*")
+
+    def _git_fetch_with_backoff(self, ref: str, max_retries=3):
+        """Exponential backoff for fetches (Network resiliency)."""
+        retries = 0
+        while retries < max_retries:
+            try:
+                self._run_git(['fetch', 'origin', ref], timeout=300)
+                return
+            except GitCommandError as e:
+                # Check for fatal index issues that _run_git Purged, which means we must re-init
+                if not os.path.exists(self.repo_dir):
+                    self.initialize()
+                    return
+                retries += 1
+                time.sleep(2 ** retries)
+        raise GitCommandError(f"Failed to fetch {ref} after {max_retries} attempts.")
+
+    def reset_state_hygiene(self, target_branch: str):
+        """
+        State Hygiene: Bring dirty repo exactly to remote's state by destroying 
+        leaked files, rebases in progress, and hard resetting.
+        """
+        with self._lock:
+            self._git_fetch_with_backoff(target_branch)
+            # Clean leaked .git/rebase-merge 
+            rebase_dir = os.path.join(self.repo_dir, '.git', 'rebase-merge')
+            if os.path.exists(rebase_dir):
+                shutil.rmtree(rebase_dir, ignore_errors=True)
+            
+            # Hard Reset exactly to origin
+            self._run_git(['checkout', '-f', target_branch])
+            self._run_git(['reset', '--hard', f'origin/{target_branch}'])
+            self._run_git(['clean', '-x', '-f', '-d'])
+
+    def merge_patchset(self, patchset_ref: str, strategy: str = "merge") -> str:
+        """
+        Git Operations against FETCH_HEAD without creating detached branches.
+        Returns the standard merge commit hash.
+        """
+        with self._lock:
+            self._git_fetch_with_backoff(patchset_ref)
+            
+            try:
+                if strategy == "cherry-pick":
+                    self._run_git(['cherry-pick', 'FETCH_HEAD'])
+                elif strategy == "squash":
+                    self._run_git(['merge', '--squash', 'FETCH_HEAD'])
+                    self._run_git(['commit', '-m', f"Squashed {patchset_ref}"])
+                elif strategy == "rebase":
+                    self._run_git(['rebase', 'FETCH_HEAD'])
+                else: 
+                    self._run_git(['merge', '--no-edit', '--no-ff', 'FETCH_HEAD'])
+                
+                # Identify resulting commit hash
+                return self._run_git(['rev-parse', 'HEAD']).stdout.strip()
+            except GitCommandError:
+                self._run_git(['merge', '--abort'], check=False)
+                self._run_git(['cherry-pick', '--abort'], check=False)
+                self._run_git(['rebase', '--abort'], check=False)
+                raise # Pass conflict up
+
+    def read_files_at_ref(self, ref: str, file_paths: List[str]) -> Dict[str, str]:
+        """Reads multiple files off a specific commit or ref, e.g., for config extraction."""
+        with self._lock:
+            self._git_fetch_with_backoff(ref)
+            results = {}
+            for fp in file_paths:
+                try:
+                    content = self._run_git(["show", f"FETCH_HEAD:{fp}"]).stdout
+                    results[fp] = content
+                except GitCommandError:
+                    results[fp] = None  # File missing or error reading
+            return results

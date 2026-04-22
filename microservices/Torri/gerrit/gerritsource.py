@@ -4,9 +4,9 @@ from shared.logger_setup import get_logger
 class GerritSource:
 
     name = "gerrit"
-    logger = get_logger("torri.source.gerrit")
 
     def __init__(self, connection=None):
+        self.logger = get_logger("torri.source.gerrit")
         self.connection = connection
 
     def getRefSha(self, change):

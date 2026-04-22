@@ -12,9 +12,9 @@ from concurrent.futures import ThreadPoolExecutor
 
 
 class GerritEventProcessor(threading.Thread):
-    logger = get_logger("torri.gerrit.event_processor")
     def __init__(self, kafka_connection, gerrit_connection):
         super().__init__(name="GerritEventProcessor", daemon=True)
+        self.logger = get_logger("torri.gerrit.event_processor")
         self.kafka_connection = kafka_connection
         self.gerrit_connection = gerrit_connection
         self._stopped = False
@@ -24,10 +24,11 @@ class GerritEventProcessor(threading.Thread):
         self.kafka_connection.addEvent(None)
 
     def _build_event(self, data):
+        self.logger.debug("Building event from payload keys=%s", list(data.keys()))
         event = GerritTriggerEvent()
         event.type = str(data.get("type", "unknown"))
         if event.type not in known_events:
-            self.logger.debug("Skip unknown event")
+            self.logger.debug("Skip unknown event type=%s", event.type)
             return None
         event.comment = str(data.get("comment", ""))
 
@@ -60,18 +61,36 @@ class GerritEventProcessor(threading.Thread):
             self.kafka_connection.eventDone()
             return
 
+        self.logger.debug(
+            "Handling event type=%s change=%s patch=%s project=%s",
+            event.type,
+            event.change_number,
+            event.patch_number,
+            event.project_name,
+        )
+
         if event.change_number:
+            self.logger.debug("Submitting change enrichment for change=%s", event.change_number)
             future = self.gerrit_connection.executor.submit(
                 self.gerrit_connection.getChange, event.change_number
             )
             future.add_done_callback(lambda f: self._on_enrichment_done(f, event))
         else:
+            self.logger.debug("Event has no change number, dispatching directly")
             self._dispatch_event(event)
             self.kafka_connection.eventDone()
 
     def _on_enrichment_done(self, future, event):
         try:
             event.change_details = future.result()
+            self.logger.debug(
+                "Enrichment done for change=%s has_details=%s",
+                event.change_number,
+                event.change_details is not None,
+            )
+            data = json.dumps(event)
+            encode_data = data.encode('utf-8')
+            self.logger.debug(f"true size of the event is {len(encode_data)}")
             self._dispatch_event(event)
         except Exception as exc:
             self.logger.error(
@@ -82,6 +101,12 @@ class GerritEventProcessor(threading.Thread):
             self.kafka_connection.eventDone()
 
     def _dispatch_event(self, event):
+        self.logger.debug(
+            "Dispatch event type=%s change=%s branch=%s",
+            event.type,
+            event.change_number,
+            event.branch,
+        )
         self.gerrit_connection.sched.addEvent(event)
 
     def run(self) -> None:
@@ -170,10 +195,10 @@ class ChangeNetworkManager:
 
 class GerritRestConnection(BaseConnection):
     """REST client for querying Gerrit changes."""
-    logger = get_logger("torri.connection.gerrit")
     GERRIT_CHANGE_CACHE_SIZE = 10_000
 
     def __init__(self, base_url, auth=None):
+        self.logger = get_logger("torri.connection.gerrit")
         self.base_url = base_url.rstrip("/")
         self.session = requests.Session()
         self._authenticated = auth is not None
@@ -183,6 +208,11 @@ class GerritRestConnection(BaseConnection):
         self.cache_lock = threading.RLock()
         self._network_manager = ChangeNetworkManager()
         self.executor = ThreadPoolExecutor(max_workers=5)
+        self.logger.debug(
+            "Initialized GerritRestConnection base_url=%s authenticated=%s",
+            self.base_url,
+            self._authenticated,
+        )
 
     def query(self, change_number):
         """
@@ -195,9 +225,21 @@ class GerritRestConnection(BaseConnection):
         number_of_retries = 3
         for attempt in range(number_of_retries):
             try:
+                self.logger.debug(
+                    "Query change=%s attempt=%s/%s",
+                    change_number,
+                    attempt + 1,
+                    number_of_retries,
+                )
                 data = self._get(endpoint)
                 related = self._get('changes/%s/revisions/%s/related' % (
                     change_number, data['current_revision']))
+                self.logger.debug(
+                    "Query success change=%s current_revision=%s related_count=%s",
+                    change_number,
+                    data.get('current_revision'),
+                    len(related.get('changes', [])) if isinstance(related, dict) else 0,
+                )
                 return data, related
             except Exception as e:
                 if attempt < number_of_retries - 1:
@@ -212,14 +254,17 @@ class GerritRestConnection(BaseConnection):
 
     def _get(self, endpoint):
         url = self._build_url(endpoint)
+        self.logger.debug("HTTP GET %s", url)
         response = self.session.get(url, timeout=15)
         response.raise_for_status()
+        self.logger.debug("HTTP %s bytes=%s", response.status_code, len(response.text))
         return self._parse_response(response.text)
 
     def _build_url(self, endpoint):
+        endpoint = endpoint.lstrip("/")
         if self._authenticated:
             return f"{self.base_url}/a/{endpoint}"
-        return f"{self.base_url}{endpoint}"
+        return f"{self.base_url}/{endpoint}"
 
     def _parse_response(self, text):
         # Gerrit prefixes JSON responses with )]}' to prevent XSSI
@@ -235,13 +280,18 @@ class GerritRestConnection(BaseConnection):
 
         change = self.getChangeFromCache(key)
         if change is not None and not refresh:
+            self.logger.debug("Cache hit for key=%s", key)
             return change
 
+        self.logger.debug("Cache miss or refresh for key=%s refresh=%s", key, refresh)
+
         should_fetch, payload = self._network_manager.begin(str(change_number))
+        self.logger.debug("Network manager state=%s change=%s", should_fetch, change_number)
         if should_fetch == 'inflight':
             self.logger.warning("Circular dependency on change %s, returning in-flight object.", change_number)
             return payload or self.getChangeFromCache(key)
         if should_fetch == 'wait':
+            self.logger.debug("Waiting for in-flight fetch on change=%s", change_number)
             payload.wait()
             self._network_manager.end_wait()
             return self.getChangeFromCache(key)
@@ -257,6 +307,7 @@ class GerritRestConnection(BaseConnection):
                 self.addChangeToCache(key, change)
 
             self._network_manager.register(str(change_number), change)
+            self.logger.debug("Fetching and updating change=%s patchset=%s", change_number, change_patchset)
             return self._updateChange(change, change_number, change_patchset, history=history)
         finally:
             self._network_manager.finish(str(change_number))
@@ -272,12 +323,24 @@ class GerritRestConnection(BaseConnection):
                         depends_on = (change["_change_number"], change["_current_revision_number"])
                     elif change["_change_number"] > change_number:
                         needed_by_changes.append((change["_change_number"], change["_current_revision_number"]))
+        self.logger.debug(
+            "Dependencies for change=%s depends_on=%s needed_by=%s",
+            change_number,
+            depends_on,
+            needed_by_changes,
+        )
         return depends_on, needed_by_changes
 
     def _updateChange(self, change, change_number, change_patchset, history=None):
         if history is None:
             history = []
         history = history + [str(change_number)]
+        self.logger.debug(
+            "Updating change=%s patchset=%s history=%s",
+            change_number,
+            change_patchset,
+            history,
+        )
 
         data, related = self.query(change_number)
         change.update(data)
@@ -301,6 +364,12 @@ class GerritRestConnection(BaseConnection):
 
         with self.cache_lock:
             self.change_cache_rest_api[self._change_key(change_number, change_patchset)] = change
+        self.logger.debug(
+            "Updated change=%s needs=%s needed_by=%s",
+            change_number,
+            len(change.needs_changes),
+            len(change.needed_by_changes),
+        )
 
         return change
 
