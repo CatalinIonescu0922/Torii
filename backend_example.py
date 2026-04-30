@@ -1,7 +1,7 @@
-// Example backend route using FastAPI returning the shape React expects
+# Example backend route using FastAPI returning the shape React expects
 
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMArray
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 

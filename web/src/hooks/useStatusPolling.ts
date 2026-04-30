@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { StatusResponse } from '../types/status';
+import type { StatusResponse } from '../types/status';
 
 export function useStatusPolling(pollIntervalMs: number = 5000) {
   const [data, setData] = useState<StatusResponse | null>(null);

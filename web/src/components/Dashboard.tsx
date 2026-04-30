@@ -1,6 +1,6 @@
 import React from 'react';
 import { useStatusPolling } from '../hooks/useStatusPolling';
-import { Pipeline, Change, Job } from '../types/status';
+import type { Pipeline, Change, Job } from '../types/status';
 
 export function Dashboard() {
   // Polling every 5 seconds (5000ms), no websockets used.
