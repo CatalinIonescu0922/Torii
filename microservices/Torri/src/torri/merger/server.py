@@ -95,7 +95,7 @@ class KafkaConsumerWorker:
         # Annotate logger dynamically!
         # Contextual tracing is crucial as detailed in the architecture plan
         job_logger = get_logger("torri.merger.job")
-        job_logger.info("Processing action %s for repo %s", request.action, request.target_repository)
+        job_logger.info("Processing action %s for repo %s (Job: %s, Trace: %s)", request.action, request.target_repository, request.job_id, request.trace_id)
         
         # 2. Synchronous Thread Domain Execution Orchestrated
         try:

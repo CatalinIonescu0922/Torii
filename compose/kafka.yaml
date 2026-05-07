@@ -39,13 +39,15 @@ services:
       - bash 
       - -c 
       - |
-        docker exec kafka /opt/kafka/bin/kafka-topics.sh \
-          --bootstrap-server kafka:9092 \
-          --create \
-          --if-not-exists \
-          --topic gerrit-stream-events \
-          --partitions 3 \
-          --replication-factor 1
+        for topic in ${KAFKA_TOPICS}; do
+          docker exec kafka /opt/kafka/bin/kafka-topics.sh \
+            --bootstrap-server kafka:9092 \
+            --create \
+            --if-not-exists \
+            --topic $$topic \
+            --partitions 3 \
+            --replication-factor 1
+        done
     networks:
       - torii
   kafka-ui:

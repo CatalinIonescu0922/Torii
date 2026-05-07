@@ -5,6 +5,7 @@ include:
       - ./gerrit.yaml
       - ./nginx.yaml
       - ./kafka.yaml
+      - ./server.yaml
 
 networks:
   torii:

@@ -1,3 +1,4 @@
 shh/*
 */*.env
 *.jar
+__pycache__/*

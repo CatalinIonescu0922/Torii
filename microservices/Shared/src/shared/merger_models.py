@@ -18,7 +18,7 @@ class MergeRequest(BaseModel):
     trace_id: Optional[str] = None
     target_repository: str
     base_branch: str
-    patchset_ref: str
+    patchset_refs: list[str]
     action: MergeAction
     # E.g., for READ_CONFIG
     files_to_read: Optional[list[str]] = Field(default_factory=list)

@@ -1,0 +1,33 @@
+services:
+  scheduler:
+    pull_policy: build
+    build:
+      context: ../
+      dockerfile: compose/Dockerfile
+      target: scheduler
+    container_name: torii_scheduler
+    networks:
+      - torii
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_SERVER: kafka:9092
+
+  merger:
+    pull_policy: build
+    build:
+      context: ../
+      dockerfile: compose/Dockerfile
+      target: merger
+    container_name: merger_service
+    networks:
+      - torii
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_SERVER: kafka:9092
+
+
+
