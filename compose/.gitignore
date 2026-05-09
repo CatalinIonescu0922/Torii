@@ -1,3 +1,5 @@
 shh/*
 */*.env
 *.md
+logs/
+*.rst

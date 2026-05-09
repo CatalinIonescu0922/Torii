@@ -6,6 +6,8 @@ services:
       dockerfile: compose/Dockerfile
       target: scheduler
     container_name: torii_scheduler
+    # volumes:
+      # - ./logs/scheduler:/app/Torri/src/torri/ephemeral/logs
     networks:
       - torii
     depends_on:
@@ -21,6 +23,8 @@ services:
       dockerfile: compose/Dockerfile
       target: merger
     container_name: merger_service
+    volumes:
+      - ./logs/merger/:/tmp/ephemeral/logs/
     networks:
       - torii
     depends_on:

@@ -5,14 +5,14 @@ services:
       service: gerrit
     container_name: gerrit
     environment:
-      CANONICAL_WEB_URL: http://gerrit:8080/g/
+      CANONICAL_WEB_URL: http://localhost:8087/g/
       HTTPD_LISTEN_URL: proxy-http://*:8080/g/
     restart: unless-stopped
     depends_on:
       kafka:
         condition: service_healthy
-    ports:
-      - 8080:8080
+    # ports:
+    #   - 8080:8080
     volumes:
       - gerrit_git:/var/gerrit/git
       - gerrit_index:/var/gerrit/index

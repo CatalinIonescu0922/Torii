@@ -62,6 +62,14 @@ FROM runtime-base AS merger
 COPY --link compose/files/ssh/ /home/git/.ssh/
 COPY --link compose/files/supervisor/merger/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
+# Symlink for SSH config compatibility: /root/.ssh -> /home/git/.ssh
+RUN chmod 700 /home/git/.ssh && chmod 600 /home/git/.ssh/Torri_ed25519
+RUN rm -rf /root/.ssh && ln -s /home/git/.ssh /root/.ssh
+
+# Configure Git user for merge commit creation
+RUN git config --global user.email "torii@localdomain" && \
+    git config --global user.name "Torii Merger"
+
 EXPOSE 22
 
 # ==========================================
