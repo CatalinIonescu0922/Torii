@@ -26,9 +26,12 @@ class KafkaConsumerWorker:
         self.dlq_topic = os.getenv("KAFKA_MERGER_DLQ_TOPIC", "merger-dlq")
         
         self.workspace_root = os.getenv("MERGER_WORKSPACE_PATH", "/tmp/torri_merger_workspaces")
+        self.cache_root = os.path.join(self.workspace_root, "cache")  # Persistent cache for repos
         os.makedirs(self.workspace_root, exist_ok=True)
+        os.makedirs(self.cache_root, exist_ok=True)
 
-        self.orchestrator = Merger(self.workspace_root)
+        # Default orchestrator uses cache (no cleanup after job)
+        self.cache_orchestrator = Merger(self.cache_root)
         
         self.consumer_config = {
             'bootstrap.servers': os.getenv("KAFKA_SERVER", "localhost:9094"),
@@ -100,21 +103,31 @@ class KafkaConsumerWorker:
         # 2. Synchronous Thread Domain Execution Orchestrated
         try:
             repo_name = request.target_repository.split("/")[-1].replace(".git", "")
+            
+            # Use persistent cache orchestrator - repos are kept for reuse
+            # This avoids re-cloning on every job, which is efficient for burst traffic
+            
             if request.action == MergeAction.SPECULATIVE_MERGE:
-                # Build speculative namespace
+                # Build speculative namespace - preserving exact order from patchset_refs
                 items = [
                     SpeculativeMergeItem(
                         target_repo_url=request.target_repository,
                         repo_name=repo_name,
                         base_branch=request.base_branch,
                         patchset_ref=ref,
-                        strategy="merge"
+                        strategy=request.strategy or "merge",
+                        index=idx  # Track original position in patchset_refs list
                     )
-                    for ref in request.patchset_refs
+                    for idx, ref in enumerate(request.patchset_refs)
                 ]
                 
+                # DEBUG: Log the items as received from Kafka
+                job_logger.info("📮 Received from Kafka - patchset_refs order: %s", request.patchset_refs)
+                job_logger.info("📮 Created items with indices: %s", [(item.patchset_ref, item.index) for item in items])
+                
                 # Orchestrate: this handles state hygiene, GC protection, and Checkpoint rollbacks safely
-                merger_results = self.orchestrator.mergeChanges(items)
+                # Uses cache orchestrator which keeps repos for reuse across jobs
+                merger_results = self.cache_orchestrator.mergeChanges(items)
                 
                 # Extract the newly tagged namespace (refs/torri/...)
                 merged_hash = merger_results.get(repo_name)
@@ -122,7 +135,7 @@ class KafkaConsumerWorker:
             elif request.action == MergeAction.READ_CONFIG:
                 if request.files_to_read and request.patchset_refs:
                     # Leverage the internal mapped _get_repo so it inherently tests against Tree Collisions
-                    repo = self.orchestrator._get_repo(request.target_repository, repo_name)
+                    repo = self.cache_orchestrator._get_repo(request.target_repository, repo_name)
                     files_content = repo.read_files_at_ref(request.patchset_refs[0], request.files_to_read)
                     response_payload = files_content
 

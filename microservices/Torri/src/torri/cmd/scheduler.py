@@ -13,42 +13,41 @@ def run_server(args):
     output_topic = os.getenv("KAFKA_MERGER_OUTPUT_TOPIC", "merger-responses")
 
     test_requests = [
+        # Job 1: ISOLATED - Single ref starting fresh from origin/master
         MergeRequest(
             job_id=f"job-{uuid.uuid4().hex[:8]}",
-            target_repository="http://gerrit:8080/infrastructure/terraform.git",
-            base_branch="main",
+            target_repository="gerrit:libraries/common-utils.git",
+            base_branch="master",
             patchset_refs=["refs/changes/01/1/1"],
-            action=MergeAction.SPECULATIVE_MERGE
+            action=MergeAction.SPECULATIVE_MERGE,
+            strategy="rebase"
         ),
+        
+        # Job 2: ISOLATED - Different single ref, also starts fresh from origin/master  
         MergeRequest(
             job_id=f"job-{uuid.uuid4().hex[:8]}",
-            target_repository="http://gerrit:8080/services/api-gateway.git",
-            base_branch="main",
-            patchset_refs=["refs/changes/02/2/1", "refs/changes/03/3/1"], # Test Multiple changes!
-            action=MergeAction.SPECULATIVE_MERGE
+            target_repository="gerrit:libraries/common-utils.git",
+            base_branch="master",
+            patchset_refs=["refs/changes/02/2/1"],
+            action=MergeAction.SPECULATIVE_MERGE,
+            strategy="merge"
         ),
+        
+        # Job 3: STACKED - Multiple refs composed together!
+        # Starts from origin/master, then:
+        # 1. Rebase refs/changes/01/1/1 on origin/master
+        # 2. On top of that result, cherry-pick refs/changes/02/2/2
+        # Result: single synthetic ref with BOTH changes stacked
         MergeRequest(
             job_id=f"job-{uuid.uuid4().hex[:8]}",
-            target_repository="http://gerrit:8080/services/api-gateway.git",
-            base_branch="develop",
-            patchset_refs=["refs/changes/04/4/1"], # Same repo, different branch test
-            action=MergeAction.SPECULATIVE_MERGE
+            target_repository="gerrit:libraries/common-utils.git",
+            base_branch="master",
+            patchset_refs=["refs/changes/01/1/1", "refs/changes/02/2/1","refs/changes/03/3/1"],
+            action=MergeAction.SPECULATIVE_MERGE,
+            strategy="rebase"  # Strategy applies to ALL refs in this stack
         ),
-        MergeRequest(
-            job_id=f"job-{uuid.uuid4().hex[:8]}",
-            target_repository="http://gerrit:8080/libraries/common-utils.git",
-            base_branch="main",
-            patchset_refs=["refs/changes/05/5/2", "refs/changes/06/6/1", "refs/changes/07/7/1"], # 3 changes
-            action=MergeAction.SPECULATIVE_MERGE
-        ),
-        MergeRequest(
-            job_id=f"job-{uuid.uuid4().hex[:8]}",
-            target_repository="http://gerrit:8080/web/frontend-app.git",
-            base_branch="main",
-            patchset_refs=["refs/changes/08/8/1"],
-            action=MergeAction.SPECULATIVE_MERGE
-        ),
-    ] # Added 5 heavy requests (totals 8 distinct merges).
+
+        ]
 
     for i, req in enumerate(test_requests):
         print(f"📤 Sending Request {i+1}: {req.job_id} for repo: {req.target_repository.split('/')[-1]} with refs: {req.patchset_refs}")

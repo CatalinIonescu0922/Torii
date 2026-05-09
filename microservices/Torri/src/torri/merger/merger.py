@@ -11,13 +11,13 @@ class MergerTreeError(Exception):
     pass
 
 class SpeculativeMergeItem:
-    def __init__(self, target_repo_url: str, repo_name: str, base_branch: str, patchset_ref: str, strategy: str = "merge"):
+    def __init__(self, target_repo_url: str, repo_name: str, base_branch: str, patchset_ref: str, strategy: str = "merge", index: int = 0):
         self.target_repo_url = target_repo_url
         self.repo_name = repo_name
         self.base_branch = base_branch
         self.patchset_ref = patchset_ref
-        # Supports: 'merge', 'cherry-pick', 'squash', 'rebase'
         self.strategy = strategy
+        self.index = index  # Track original order in patchset_refs list
 
 class Merger:
     """
@@ -60,13 +60,21 @@ class Merger:
         """
         refs_map = {}
         # Iterate all active refs output logic stripped for brevity.
-        raw_refs = repo._run_git(['show-ref']).stdout.splitlines()
-        for line in raw_refs:
-            if not line:
-                continue
-            sha, ref = line.split(" ", 1)
-            refs_map[ref] = sha
-        self.logger.debug("Saved state with %s refs", len(refs_map))
+        try:
+            result = repo._run_git(['show-ref'], check=False)
+            if result.returncode != 0:
+                self.logger.warning("show-ref failed (repo may be empty): %s", result.stderr)
+                return refs_map
+            raw_refs = result.stdout.splitlines()
+            for line in raw_refs:
+                if not line:
+                    continue
+                sha, ref = line.split(" ", 1)
+                refs_map[ref] = sha
+            self.logger.debug("Saved state with %s refs", len(refs_map))
+        except Exception as e:
+            self.logger.error("Failed to save repo state: %s", e)
+            raise
         return refs_map
 
     def _restoreRepoState(self, repo: Repo, state: Dict[str, str]):
@@ -87,41 +95,76 @@ class Merger:
         """
         The Speculative Merge Engine.
         Executes a sequence of merges synchronously tagging the final status.
-        If PRI -> PR2 fails, rolls back PRI state.
+        For same job (same target_repo_url): refs are STACKED on top of each other
+        For different jobs (different target_repo_url): each gets SEPARATE env starting from origin/base_branch
+        If any merge fails, rolls back ALL changes via checkpoints.
         Returns: {repo_name: synthetic_tag_ref}
         """
         # Dictionary storing where we got successfully
         synthetic_hash_map = {}
         state_checkpoints = {}
 
-        self.logger.info("Starting Speculative Merge Stack (%s items)", len(items))
-        try:
-            for item in items:
-                repo = self._get_repo(item.target_repo_url, item.repo_name)
-                
-                # Checkpoint the repository BEFORE any merge
-                state_checkpoints[item.repo_name] = self._saveRepoState(repo)
-                
-                # Perform state hygiene to lock back to the remote cleanly
-                repo.reset_state_hygiene(item.base_branch)
+        # Group items by target_repo_url (same job vs separate jobs)
+        from collections import defaultdict
+        items_by_repo = defaultdict(list)
+        for item in items:
+            items_by_repo[item.target_repo_url].append(item)
 
-                # Execute merge strategy natively via FETCH_HEAD
-                commit_hash = repo.merge_patchset(item.patchset_ref, strategy=item.strategy)
+        self.logger.info("Starting Speculative Merge Stack (%s items, %s unique repos)", len(items), len(items_by_repo))
+        
+        try:
+            # Process each repository separately
+            for target_repo_url, repo_items in items_by_repo.items():
+                repo = self._get_repo(target_repo_url, repo_items[0].repo_name)
+                repo_name = repo_items[0].repo_name
                 
-                # Crucial Step: Tag the resulting synthetic commit to avoid GC pruning
-                # This exposes refs/zuul/... that external CI executors can fetch!
-                synthetic_tag = f"refs/torri/{item.patchset_ref.replace('/','_')}_{uuid.uuid4().hex[:8]}"
-                repo._run_git(['update-ref', synthetic_tag, commit_hash])
+                # DEBUG: Log items before sorting
+                self.logger.info("🔍 Items BEFORE sort (from Kafka): %s", [(item.patchset_ref, item.index) for item in repo_items])
                 
-                self.logger.info("Created synthetic branch state %s at %s", synthetic_tag, commit_hash)
-                synthetic_hash_map[item.repo_name] = synthetic_tag
+                # Checkpoint ONCE for this repo (before any merges in this group)
+                state_checkpoints[repo_name] = self._saveRepoState(repo)
+                
+                # RESET ONCE at the start for this job - establishes base from origin
+                base_branch = repo_items[0].base_branch
+                repo.reset_state_hygiene(base_branch)
+                self.logger.info("Stacking %d refs on %s (starting from origin/%s)", len(repo_items), repo_name, base_branch)
+                
+                # Ensure refs are processed in EXACT original order (left-to-right)
+                # Sort by index which tracks position in the original patchset_refs list
+                ordered_items = sorted(repo_items, key=lambda x: x.index)
+                self.logger.info("🔍 Items AFTER sort (should be left-to-right): %s", [(item.patchset_ref, item.index) for item in ordered_items])
+                self.logger.debug("Processing %d items in order: %s", len(ordered_items), [item.patchset_ref for item in ordered_items])
+                
+                # Now stack all refs from this job ON TOP of each other
+                final_hash = None
+                for idx, item in enumerate(ordered_items):
+                    # First ref detaches to origin/base_branch, subsequent refs stack ON TOP
+                    detach_first = (idx == 0)
+                    self.logger.info("🔄 Applying ref #%d: %s (strategy=%s, detach=%s)", idx+1, item.patchset_ref, item.strategy, detach_first)
+                    final_hash = repo.merge_patchset(item.patchset_ref, strategy=item.strategy, base_branch=base_branch, detach_to_base=detach_first)
+                    self.logger.debug("✅ Stacked ref %d/%d: %s -> %s (strategy=%s, detach=%s)", 
+                                     idx+1, len(repo_items), item.patchset_ref, final_hash, item.strategy, detach_first)
+                    
+                    # Create intermediate synthetic ref for debugging (optional, but useful)
+                    # This allows tracking individual refs in the stack
+                    intermediate_tag = f"refs/torri/{item.patchset_ref.replace('/','_')}_{uuid.uuid4().hex[:8]}"
+                    repo._run_git(['update-ref', intermediate_tag, final_hash])
+                    self.logger.debug("Intermediate synthetic ref: %s -> %s", intermediate_tag, final_hash)
+                
+                # Create FINAL synthetic ref for the entire stacked result
+                # All refs in the job are represented by this single final hash
+                stack_tag = f"refs/torri/{base_branch}_stack_{uuid.uuid4().hex[:8]}"
+                repo._run_git(['update-ref', stack_tag, final_hash])
+                
+                self.logger.info("Final stacked result for job (repo=%s): %s -> %s", repo_name, stack_tag, final_hash)
+                synthetic_hash_map[repo_name] = stack_tag
 
         except GitCommandError as e:
             self.logger.error("Speculative stack collapsed during merge: %s", e)
             # Cascade rollback via checkpoints
             for r_name, checkpoint in state_checkpoints.items():
                 self._restoreRepoState(self.repos[r_name], checkpoint)
-            raise  # Hand back conflict to KafkConsumerWorker
+            raise  # Hand back conflict to KafkaConsumerWorker
 
         return synthetic_hash_map
 

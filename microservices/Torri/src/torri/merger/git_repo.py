@@ -28,7 +28,7 @@ class GitRepo:
     def _run_git_command(self, args: list[str], timeout: int = 120) -> str:
         """Helper to run a git command safely with process timeouts and stderr capture."""
         cmd = ['git'] + args
-        logger = get_logger("torri.merger.git", job_id=self.repo_name) # Will use contextual logs if set
+        logger = get_logger("torri.merger.git")
         
         try:
             logger.debug("Running command: %s", " ".join(cmd))

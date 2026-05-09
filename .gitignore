@@ -2,3 +2,4 @@ shh/*
 */*.env
 *.jar
 __pycache__/*
+*.rst

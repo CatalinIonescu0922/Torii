@@ -20,6 +20,7 @@ class MergeRequest(BaseModel):
     base_branch: str
     patchset_refs: list[str]
     action: MergeAction
+    strategy: Optional[str] = Field(default="merge", description="Merge strategy: merge, rebase, cherry-pick, or squash")
     # E.g., for READ_CONFIG
     files_to_read: Optional[list[str]] = Field(default_factory=list)
 
