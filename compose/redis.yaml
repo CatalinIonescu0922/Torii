@@ -1,0 +1,24 @@
+services:
+  redis:
+    image: redis:${REDIS_TAG:-7-alpine}
+    container_name: torii_redis
+    ports:
+      - '6379:6379'
+    command: 
+      - redis-server
+      - '--appendonly'
+      - 'yes'
+      - '--loglevel'
+      - 'notice'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - redis_data:/data
+    networks:
+      - torii
+
+volumes:
+  redis_data:

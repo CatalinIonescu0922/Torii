@@ -14,7 +14,13 @@ class BaseConnection(metaclass=abc.ABCMeta):
     Connections can implement their own public methods. Required connection
     methods are validated by the {trigger, source, reporter} they are loaded
     into. For example, a trigger will likely require some kind of query method
-    while a reporter may need a review method."""
+    while a reporter may need a review method.
+    
+    Multi-Connection Support:
+    - Each connection normalizes events to unified TriggerEvent format
+    - registerScheduler() receives ConnectionManager (not scheduler directly)
+    - Events dispatched via connection_manager.add_event(event)
+    """
 
     def __init__(self, connection_name, connection_config):
         # connection_name is the name given to this connection in zuul.ini
@@ -24,6 +30,7 @@ class BaseConnection(metaclass=abc.ABCMeta):
         # isn't used in the layout.
         self.connection_name = connection_name
         self.connection_config = connection_config
+        self.attached_to = {}
 
         # Keep track of the sources, triggers and reporters using this
         # connection
@@ -35,11 +42,21 @@ class BaseConnection(metaclass=abc.ABCMeta):
         """Placeholder for actions to take when the connection is stopped"""
 
     def registerScheduler(self, sched):
-        """Register the scheduler with this connection"""
+        """
+        Register scheduler or connection manager with this connection.
+        
+        Args:
+            sched: Scheduler instance or ConnectionManager instance
+        
+        In multi-connection setup, this receives ConnectionManager.
+        Connection uses it to dispatch normalized events via sched.add_event(event).
+        """
         self.sched = sched
 
     def registerUse(self, what, instance):
         """Registers an object instance that uses this connection"""
+        if what not in self.attached_to:
+            self.attached_to[what] = []
         self.attached_to[what].append(instance)
         
     def __repr__(self):

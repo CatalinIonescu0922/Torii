@@ -11,10 +11,13 @@ services:
     networks:
       - torii
     depends_on:
+      redis:
+        condition: service_healthy
       kafka:
         condition: service_healthy
     environment:
       KAFKA_SERVER: kafka:9092
+      REDIS_URL: redis://redis:6379/0
 
   merger:
     pull_policy: build
@@ -28,10 +31,13 @@ services:
     networks:
       - torii
     depends_on:
+      redis:
+        condition: service_healthy
       kafka:
         condition: service_healthy
     environment:
       KAFKA_SERVER: kafka:9092
+      REDIS_URL: redis://redis:6379/0
 
 
 

@@ -2,6 +2,7 @@ name: torri-compose
 include:
   - env_file: ./default.env
     path:
+      - ./redis.yaml
       - ./gerrit.yaml
       - ./nginx.yaml
       - ./kafka.yaml

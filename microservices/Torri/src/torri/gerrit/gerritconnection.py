@@ -6,7 +6,7 @@ from shared.logger_setup import get_logger
 from shared.exceptions import GerritQueryError
 from queue import Empty
 from shared.gerritmodel import GerritChange, GerritTriggerEvent
-from connection import BaseConnection
+from torri.connection import BaseConnection
 from shared.gerritmodel import known_events
 from concurrent.futures import ThreadPoolExecutor
 
@@ -250,12 +250,136 @@ class GerritRestConnection(BaseConnection):
     def getChange(self, change_number, change_patchset=None, refresh=False, history=None):
         return self._getChange(change_number, change_patchset, refresh, history)
 
+    def submit_change(self, change_number: str, strategy: str = None) -> tuple:
+        """
+        Submit (merge) a change to Gerrit.
+        
+        Endpoint: POST /a/changes/{change-id}/submit
+        
+        If strategy is None, Gerrit uses the repo's default strategy
+        configured in gerrit.config
+        
+        Args:
+            change_number: Change ID or number
+            strategy: Optional merge strategy override
+        
+        Returns:
+            (success: bool, response: dict or error_msg: str)
+        """
+        try:
+            endpoint = f'changes/{change_number}/submit'
+            payload = {}
+            
+            if strategy:
+                payload['strategy'] = strategy
+            
+            # Empty payload = use repo's default strategy
+            response = self._post(endpoint, payload if payload else None)
+            
+            status = response.get('status')  # MERGED, ABANDONED, etc.
+            self.logger.info(
+                "Submitted change %s, status=%s",
+                change_number, status
+            )
+            
+            return True, response
+        
+        except Exception as e:
+            error_msg = str(e)
+            self.logger.error("Failed to submit change %s: %s", change_number, error_msg)
+            return False, error_msg
+    
+    def mergeable(self, change_number: str) -> tuple:
+        """
+        Check if a change is currently mergeable.
+        
+        Returns:
+            (mergeable: bool, status_dict)
+        """
+        try:
+            endpoint = f'changes/{change_number}/merge'
+            response = self._get(endpoint)
+            
+            mergeable = response.get('mergeable', False)
+            self.logger.debug(
+                "Change %s mergeable=%s conflict=%s",
+                change_number,
+                mergeable,
+                response.get('merge_conflict', False)
+            )
+            
+            return mergeable, response
+        
+        except Exception as e:
+            self.logger.warning("Error checking mergeable status: %s", e)
+            return False, str(e)
+    
+    def set_review(self, change_number: str, patchset: str, message: str, labels: dict = None) -> bool:
+        """
+        Post a review/vote on a change.
+        
+        Args:
+            change_number: Change ID
+            patchset: Patchset number
+            message: Review message
+            labels: Dict of label votes, e.g., {"Code-Review": 1, "Verified": 1}
+        
+        Returns:
+            success: bool
+        """
+        try:
+            endpoint = f'changes/{change_number}/revisions/{patchset}/review'
+            payload = {
+                'message': message,
+                'labels': labels or {}
+            }
+            
+            self._post(endpoint, payload)
+            
+            self.logger.info(
+                "Posted review on change %s patchset %s",
+                change_number, patchset
+            )
+            return True
+        
+        except Exception as e:
+            self.logger.error("Error posting review: %s", e)
+            return False
+
     # --- helpers ---
 
     def _get(self, endpoint):
         url = self._build_url(endpoint)
         self.logger.debug("HTTP GET %s", url)
         response = self.session.get(url, timeout=15)
+        response.raise_for_status()
+        self.logger.debug("HTTP %s bytes=%s", response.status_code, len(response.text))
+        return self._parse_response(response.text)
+
+    def _post(self, endpoint, payload=None):
+        """POST request to Gerrit API."""
+        url = self._build_url(endpoint)
+        self.logger.debug("HTTP POST %s payload=%s", url, payload)
+        response = self.session.post(
+            url,
+            json=payload,
+            headers={'Content-Type': 'application/json'},
+            timeout=30
+        )
+        response.raise_for_status()
+        self.logger.debug("HTTP %s bytes=%s", response.status_code, len(response.text))
+        return self._parse_response(response.text)
+
+    def _put(self, endpoint, payload=None):
+        """PUT request to Gerrit API."""
+        url = self._build_url(endpoint)
+        self.logger.debug("HTTP PUT %s payload=%s", url, payload)
+        response = self.session.put(
+            url,
+            json=payload,
+            headers={'Content-Type': 'application/json'},
+            timeout=30
+        )
         response.raise_for_status()
         self.logger.debug("HTTP %s bytes=%s", response.status_code, len(response.text))
         return self._parse_response(response.text)
