@@ -13,12 +13,13 @@ import json
 from datetime import datetime, timezone
 from typing import Dict, List
 
-from shared.logger_setup import get_logger
+import logging
+
 from torri.scheduler.redis_client import TorriRedis
 
 STATUS_KEY = "torri:ui:status"
 
-logger = get_logger("torri.scheduler.status_writer")
+logger = logging.getLogger("torri.scheduler.status_writer")
 
 
 def refresh_status(

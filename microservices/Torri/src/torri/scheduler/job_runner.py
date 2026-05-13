@@ -14,12 +14,13 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Callable
 
-from shared.logger_setup import get_logger
+import logging
+
 from torri.scheduler.redis_client import TorriRedis
 
 JOB_DURATION_SECONDS = 50
 
-logger = get_logger("torri.scheduler.job_runner")
+logger = logging.getLogger("torri.scheduler.job_runner")
 
 
 def launch_jobs(

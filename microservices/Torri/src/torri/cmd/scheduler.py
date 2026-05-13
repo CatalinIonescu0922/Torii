@@ -52,7 +52,8 @@ def main():
     args = cli.parse_args()
 
     # Setup logging using the config file next to torii.conf
-    service_root = Path(__file__).resolve().parents[3]
+    # __file__ = .../torri/cmd/scheduler.py  → parents[1] = .../torri/
+    service_root = Path(__file__).resolve().parents[1]
     log_config = service_root / "config" / "log" / "main_logging.yaml"
     setup_logging(log_config, service_root)
 
