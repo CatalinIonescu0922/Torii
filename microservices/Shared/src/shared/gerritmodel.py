@@ -91,6 +91,69 @@ class GerritTriggerEvent:
         self.source = None
         self.change_details = None
 
+    def to_dict(self) -> dict:
+        change = None
+        if self.change_details is not None:
+            c = self.change_details
+            change = {
+                "base_url": c.base_url,
+                "project": c.project,
+                "branch": c.branch,
+                "id": c.id,
+                "number": c.number,
+                "patchset": c.patchset,
+                "subject": c.subject,
+                "url": c.url,
+                "status": c.status,
+                "wip": c.wip,
+                "private": c.private,
+                "author": c.author,
+                "labels": c.labels,
+            }
+        return {
+            "type": self.type,
+            "project_name": self.project_name,
+            "change_number": self.change_number,
+            "patch_number": self.patch_number,
+            "branch": self.branch,
+            "comment": self.comment,
+            "ref": self.ref,
+            "oldrev": self.oldrev,
+            "newrev": self.newrev,
+            "change_details": change,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "GerritTriggerEvent":
+        event = cls()
+        event.type = data.get("type", "")
+        event.project_name = data.get("project_name", "")
+        event.change_number = data.get("change_number", "")
+        event.patch_number = data.get("patch_number", "")
+        event.branch = data.get("branch", "")
+        event.comment = data.get("comment", "")
+        event.ref = data.get("ref", "")
+        event.oldrev = data.get("oldrev", "")
+        event.newrev = data.get("newrev", "")
+        raw_change = data.get("change_details")
+        if raw_change:
+            c = GerritChange()
+            c.base_url = raw_change.get("base_url", "")
+            c.project = raw_change.get("project", "")
+            c.branch = raw_change.get("branch", "")
+            c.id = raw_change.get("id", "")
+            c.number = raw_change.get("number", 0)
+            c.patchset = raw_change.get("patchset", 0)
+            c.subject = raw_change.get("subject", "")
+            c.url = raw_change.get("url", "")
+            c.status = raw_change.get("status", "")
+            c.wip = raw_change.get("wip", False)
+            c.private = raw_change.get("private", False)
+            c.author = raw_change.get("author", "")
+            c.labels = raw_change.get("labels", {})
+            event.change_details = c
+        return event
+
 
 
 class Project:

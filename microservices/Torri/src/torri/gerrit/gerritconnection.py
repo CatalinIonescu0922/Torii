@@ -1,4 +1,5 @@
 import json
+import os
 import requests
 import threading
 from cachetools import LRUCache
@@ -9,6 +10,7 @@ from shared.gerritmodel import GerritChange, GerritTriggerEvent
 from torri.connection import BaseConnection
 from shared.gerritmodel import known_events
 from concurrent.futures import ThreadPoolExecutor
+from torri.kafka.producer import KafkaProducerClient
 
 
 class GerritEventProcessor(threading.Thread):
@@ -18,6 +20,8 @@ class GerritEventProcessor(threading.Thread):
         self.kafka_connection = kafka_connection
         self.gerrit_connection = gerrit_connection
         self._stopped = False
+        self._trigger_topic = os.getenv("KAFKA_TRIGGER_TOPIC", "trigger-events")
+        self._producer = KafkaProducerClient()
 
     def stop(self) -> None:
         self._stopped = True
@@ -107,7 +111,13 @@ class GerritEventProcessor(threading.Thread):
             event.change_number,
             event.branch,
         )
-        self.gerrit_connection.sched.addEvent(event)
+        key = event.project_name or event.change_number or "unknown"
+        self._producer.send_message(self._trigger_topic, key, event.to_dict())
+        self._producer.flush()
+        self.logger.info(
+            "Published trigger event type=%s change=%s to topic=%s",
+            event.type, event.change_number, self._trigger_topic,
+        )
 
     def run(self) -> None:
         while not self._stopped:

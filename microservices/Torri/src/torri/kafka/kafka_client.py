@@ -12,7 +12,7 @@ class KafkaConnection(threading.Thread):
     reads any incomming messages and sends them to the approapiate structures 
     """
     
-    def __init__(self):
+    def __init__(self, topic: str = None, group_id: str = None):
         super().__init__(name="KafkaConnection", daemon=True)
         self.logger = get_logger("torri.kafka.connection")
         self.consumer: Optional[Consumer] = None
@@ -21,13 +21,13 @@ class KafkaConnection(threading.Thread):
         # Consumer configuration
         self.consumer_config = {
             'bootstrap.servers': os.getenv("KAFKA_SERVER", "localhost:9094"),
-            'group.id': os.getenv("KAFKA_GROUPID", "events-consumer-group"),
+            'group.id': group_id or os.getenv("KAFKA_GROUPID", "events-consumer-group"),
             'auto.offset.reset': 'earliest',
             'enable.auto.commit': False,  # Manual commit for reliability
             'max.poll.interval.ms': 300000  # 5 minutes
         }
 
-        self.input_topic = os.getenv("KAFKA_INPUT_TOPIC", "gerrit-stream-events")
+        self.input_topic = topic or os.getenv("KAFKA_INPUT_TOPIC", "gerrit-stream-events")
 
     def connect(self):
         """Establish connection to Kafka and start background consumption."""

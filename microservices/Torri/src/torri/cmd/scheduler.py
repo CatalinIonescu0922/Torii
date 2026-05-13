@@ -1,6 +1,7 @@
 from . import TorriCLI
 import os
 import time
+import threading
 import yaml
 from pathlib import Path
 
@@ -84,14 +85,40 @@ def main():
     )
     scheduler_queue = SchedulerQueue(gerrit_conn, yaml_dir=yaml_dir, redis_url=redis_url)
 
-    # Wire the scheduler so GerritEventProcessor can deliver events to it
-    gerrit_conn.sched = scheduler_queue
-
-    kafka_conn = KafkaConnection()
+    # gerrit-stream-events: raw Gerrit events → GerritEventProcessor enriches and
+    # publishes to trigger-events.
+    kafka_conn = KafkaConnection(
+        topic=os.getenv("KAFKA_INPUT_TOPIC", "gerrit-stream-events"),
+        group_id="gerrit-stream-consumer-group",
+    )
     kafka_conn.connect()
-
     event_processor = GerritEventProcessor(kafka_conn, gerrit_conn)
     event_processor.start()
+
+    # trigger-events: enriched events ready for the scheduler.
+    trigger_conn = KafkaConnection(
+        topic=os.getenv("KAFKA_TRIGGER_TOPIC", "trigger-events"),
+        group_id="trigger-consumer-group",
+    )
+    trigger_conn.connect()
+
+    # Bridge: read GerritTriggerEvent dicts from trigger_conn and feed the scheduler.
+    def _trigger_bridge():
+        from shared.gerritmodel import GerritTriggerEvent
+        while scheduler_queue.is_alive():
+            try:
+                data = trigger_conn.getEvent(timeout=1.0)
+                if data is None:
+                    continue
+                event = GerritTriggerEvent.from_dict(data)
+                scheduler_queue.addEvent(event)
+                trigger_conn.eventDone()
+            except Exception:
+                logger.exception("Error in trigger bridge")
+                trigger_conn.eventDone()
+
+    bridge_thread = threading.Thread(target=_trigger_bridge, name="TriggerBridge", daemon=True)
+    bridge_thread.start()
 
     scheduler_queue.start()
     logger.info("Scheduler running. Waiting for events...")
@@ -103,6 +130,7 @@ def main():
         logger.info("Shutdown signal received")
     finally:
         event_processor.stop()
+        trigger_conn.shutdown(wait=False)
         scheduler_queue.stop()
         logger.info("Scheduler stopped")
 
