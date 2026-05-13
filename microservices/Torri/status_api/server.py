@@ -31,17 +31,16 @@ EMPTY_RESPONSE = {
     "pipelines": [],
 }
 
-
-def _get_redis():
-    url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-    return redis_lib.from_url(url, decode_responses=True)
+_redis = redis_lib.from_url(
+    os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+    decode_responses=True,
+)
 
 
 @app.get("/api/status")
 def get_status():
     try:
-        r = _get_redis()
-        raw = r.get(STATUS_KEY)
+        raw = _redis.get(STATUS_KEY)
         if not raw:
             return EMPTY_RESPONSE
         return json.loads(raw)
