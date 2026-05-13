@@ -29,11 +29,27 @@ def launch_jobs(
     job_names: List[str],
     redis: TorriRedis,
     on_done: Callable[[bool], None],
+    synthetic_ref: str = None,
 ):
     """
-    Spawn one thread per job.  When all threads finish, call on_done(succeeded)
-    so the scheduler can post the Gerrit vote and refresh the status snapshot.
+    Spawn one mock thread per job.
+
+    Each thread sleeps JOB_DURATION_SECONDS then marks itself succeeded.
+    Redis is used only to persist job status for the status API — the mock
+    jobs don't need it to run. Real jobs would read synthetic_ref from Redis
+    to know which commit to check out.
+
+    synthetic_ref is required. If absent, the scheduler has a bug — we refuse
+    to start rather than run jobs against an unknown codebase state.
     """
+    if not synthetic_ref:
+        logger.error(
+            "launch_jobs called without synthetic_ref for change=%s pipeline=%s — refusing to start jobs",
+            change_id, pipeline_name,
+        )
+        on_done(False)
+        return
+
     if not job_names:
         on_done(True)
         return
@@ -43,8 +59,8 @@ def launch_jobs(
 
     for job_name in job_names:
         job_id = f"{pipeline_name}:{change_id}:{job_name}:{uuid.uuid4().hex[:6]}"
-        _write_job(redis, job_id, change_id, pipeline_name, job_name, "running", None)
-        logger.info("Job started job_id=%s change=%s pipeline=%s", job_id, change_id, pipeline_name)
+        _write_job(redis, job_id, change_id, pipeline_name, job_name, "running", None, synthetic_ref)
+        logger.info("Job started job_id=%s change=%s pipeline=%s ref=%s", job_id, change_id, pipeline_name, synthetic_ref)
 
         t = threading.Thread(
             target=_run_job,
@@ -70,7 +86,7 @@ def _run_job(job_id, change_id, pipeline_name, job_name, redis, remaining, lock,
         on_done(succeeded)
 
 
-def _write_job(redis, job_id, change_id, pipeline_name, job_name, status, end_time):
+def _write_job(redis, job_id, change_id, pipeline_name, job_name, status, end_time, synthetic_ref=None):
     key = f"torri:job:{pipeline_name}:{change_id}:{job_name}"
     now = datetime.now(timezone.utc).isoformat()
     redis.set_state(key, {
@@ -81,4 +97,5 @@ def _write_job(redis, job_id, change_id, pipeline_name, job_name, status, end_ti
         "status": status,
         "start_time": now if status == "running" else None,
         "end_time": end_time,
+        "synthetic_ref": synthetic_ref,
     })

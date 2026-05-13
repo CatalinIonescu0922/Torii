@@ -48,6 +48,9 @@ class GerritEventProcessor(threading.Thread):
             patch_number = patchset.get("number")
             if patch_number is not None:
                 event.patch_number = str(patch_number)
+            patchset_ref = patchset.get("ref")
+            if patchset_ref:
+                event.ref = str(patchset_ref)
 
         refupdate = data.get("refUpdate")
         if isinstance(refupdate, dict):

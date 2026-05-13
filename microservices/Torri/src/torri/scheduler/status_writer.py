@@ -25,18 +25,17 @@ logger = logging.getLogger("torri.scheduler.status_writer")
 def refresh_status(
     redis: TorriRedis,
     pipeline_names: List[str],
-    gerrit_conn,
 ):
     """
     Rebuild the full status snapshot and write it to Redis.
 
-    For each pipeline, read its queue, then fetch each change's details
-    (from the Gerrit change cache) and job states.
+    For each pipeline, read its queue, fetch each change's details from
+    the Redis pickle cache (stored during enrichment), and collect job states.
     """
     try:
         pipelines = []
         for pipeline_name in pipeline_names:
-            changes = _build_pipeline_changes(redis, pipeline_name, gerrit_conn)
+            changes = _build_pipeline_changes(redis, pipeline_name)
             pipelines.append({"name": pipeline_name, "changes": changes})
 
         snapshot = {
@@ -50,25 +49,22 @@ def refresh_status(
         logger.error("Failed to refresh status snapshot: %s", e, exc_info=True)
 
 
-def _build_pipeline_changes(redis: TorriRedis, pipeline_name: str, gerrit_conn) -> List[dict]:
+def _build_pipeline_changes(redis: TorriRedis, pipeline_name: str) -> List[dict]:
     queue_key = f"torri:pipeline:{pipeline_name}:queue"
     change_ids = redis.queue_list_all(queue_key)
 
     changes = []
     for change_id in change_ids:
-        change_dict = _build_change(redis, pipeline_name, change_id, gerrit_conn)
+        change_dict = _build_change(redis, pipeline_name, change_id)
         if change_dict:
             changes.append(change_dict)
     return changes
 
 
-def _build_change(redis: TorriRedis, pipeline_name: str, change_id: str, gerrit_conn) -> dict:
-    # Pull the enriched change object from the Gerrit connection cache if available
-    cached_change = None
-    try:
-        cached_change = gerrit_conn.getChange(change_id)
-    except Exception:
-        pass
+def _build_change(redis: TorriRedis, pipeline_name: str, change_id: str) -> dict:
+    # Read the enriched change object from Redis (stored as pickle during enrichment).
+    # Avoids any network call — the change is already there from when it was queued.
+    cached_change = redis.get_change(change_id)
 
     subject = ""
     branch = ""

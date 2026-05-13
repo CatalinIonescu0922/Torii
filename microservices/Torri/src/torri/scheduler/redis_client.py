@@ -61,8 +61,12 @@ class TorriRedis:
             return False
     
     def queue_enqueue(self, queue_key: str, item_id: str) -> int:
-        """Enqueue item to pipeline queue."""
+        """Enqueue item to pipeline queue. Idempotent — skips if already present."""
         try:
+            existing_pos = self.client.lpos(queue_key, item_id)
+            if existing_pos is not None:
+                self.logger.debug("Skip duplicate enqueue %s in %s at pos=%d", item_id, queue_key, existing_pos)
+                return existing_pos + 1
             length = self.client.rpush(queue_key, item_id)
             self.logger.debug("Enqueued %s to %s, length: %d", item_id, queue_key, length)
             return length

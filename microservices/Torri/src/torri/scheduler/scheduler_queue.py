@@ -19,6 +19,7 @@ from torri.scheduler.pipeline_manager import (
 )
 from torri.scheduler.job_runner import launch_jobs
 from torri.scheduler.status_writer import refresh_status
+from torri.scheduler.merger_client import request_merge
 
 
 class SchedulerQueue(threading.Thread):
@@ -150,6 +151,19 @@ class SchedulerQueue(threading.Thread):
                 if not self._change_meets_requirements(event, pipeline_config):
                     continue
 
+                # One-shot guard: if we've already started this change in this pipeline
+                # for this patchset (e.g. Kafka replay, container restart), skip entirely.
+                start_key = f"torri:started:{pipeline_name}:{change_id}:{event.patch_number}"
+                already_started = not self.redis.client.setnx(start_key, "1")
+                if already_started:
+                    self.logger.debug(
+                        "Change %s already started in pipeline %s patchset %s — skipping duplicate event",
+                        change_id, pipeline_name, event.patch_number,
+                    )
+                    continue
+                # TTL: 24 h — change should be resolved long before that
+                self.redis.client.expire(start_key, 86400)
+
                 if isinstance(pipeline, GatePipeline):
                     queue_pos = pipeline.enqueue_change(change_id, project_name, branch)
                 else:
@@ -161,7 +175,7 @@ class SchedulerQueue(threading.Thread):
                     change_id, pipeline_name, queue_pos,
                 )
 
-                # Tell Gerrit the pipeline has started
+                # Tell Gerrit the pipeline has started — sent exactly once thanks to start_key guard above
                 if pipeline_config.start_message and event.patch_number:
                     self.gerrit_conn.set_review(
                         change_id, event.patch_number,
@@ -169,26 +183,72 @@ class SchedulerQueue(threading.Thread):
                     )
 
                 job_names = self.project_pipeline_jobs.get((project_name, pipeline_name), [])
-                refresh_status(self.redis, list(self.pipeline_configs.keys()), self.gerrit_conn)
+                refresh_status(self.redis, list(self.pipeline_configs.keys()))
 
-                # Capture loop variables for the closure
+                # Capture loop variables for the closures
                 captured_pipeline_config = pipeline_config
                 captured_patchset = event.patch_number
+                captured_ref = event.ref  # patchset git ref e.g. refs/changes/01/1/1
 
-                def on_done(succeeded, _pc=captured_pipeline_config, _ps=captured_patchset):
+                def on_done(
+                    succeeded,
+                    _pc=captured_pipeline_config,
+                    _ps=captured_patchset,
+                    _cid=change_id,
+                    _pname=pipeline_name,
+                ):
                     labels = _pc.success_labels if succeeded else _pc.failure_labels
                     message = _pc.success_message if succeeded else _pc.failure_message
                     if _ps and labels:
-                        self.gerrit_conn.set_review(
-                            change_id, _ps, message=message, labels=labels
-                        )
+                        self.gerrit_conn.set_review(_cid, _ps, message=message, labels=labels)
                     elif _ps:
-                        self.gerrit_conn.set_review(change_id, _ps, message=message)
-                    refresh_status(
-                        self.redis, list(self.pipeline_configs.keys()), self.gerrit_conn
-                    )
+                        self.gerrit_conn.set_review(_cid, _ps, message=message)
+                    refresh_status(self.redis, list(self.pipeline_configs.keys()))
 
-                launch_jobs(change_id, pipeline_name, job_names, self.redis, on_done)
+                def on_merge_done(
+                    synthetic_ref,
+                    error,
+                    _jnames=job_names,
+                    _on_done=on_done,
+                    _cid=change_id,
+                    _pname=pipeline_name,
+                ):
+                    if error:
+                        self.logger.error(
+                            "Merge failed for change %s pipeline %s: %s",
+                            _cid, _pname, error,
+                        )
+                        _on_done(False)
+                        return
+                    if not synthetic_ref:
+                        self.logger.error(
+                            "Merger returned no ref for change %s pipeline %s — cannot launch jobs",
+                            _cid, _pname,
+                        )
+                        _on_done(False)
+                        return
+                    self.logger.info(
+                        "Merge ref ready for change %s pipeline %s: %s — launching %d job(s)",
+                        _cid, _pname, synthetic_ref, len(_jnames),
+                    )
+                    launch_jobs(_cid, _pname, _jnames, self.redis, _on_done, synthetic_ref=synthetic_ref)
+
+                if not captured_ref:
+                    self.logger.error(
+                        "No patchset ref for change %s patchset %s — cannot request merge",
+                        change_id, event.patch_number,
+                    )
+                    on_done(False)
+                    continue
+
+                merge_job_id = f"{pipeline_name}:{change_id}:{event.patch_number}"
+                request_merge(
+                    job_id=merge_job_id,
+                    project=project_name,
+                    branch=branch,
+                    patchset_refs=[captured_ref],
+                    on_done=on_merge_done,
+                )
 
         except Exception as e:
             self.logger.error("Error processing event: %s", e, exc_info=True)
