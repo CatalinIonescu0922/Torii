@@ -7,7 +7,7 @@ services:
       target: scheduler
     container_name: torii_scheduler
     volumes:
-      - ./logs/scheduler:/app/logs
+      - ./logs/scheduler:/app/ephemeral/logs
     networks:
       - torii
     depends_on:
@@ -20,6 +20,7 @@ services:
     environment:
       KAFKA_SERVER: kafka:9092
       REDIS_URL: redis://redis:6379/0
+      LOG_DIR: /app
     expose:
       - "8000"
     ports:

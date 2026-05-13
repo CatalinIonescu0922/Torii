@@ -53,9 +53,12 @@ def main():
 
     # Setup logging using the config file next to torii.conf
     # __file__ = .../torri/cmd/scheduler.py  → parents[1] = .../torri/
-    service_root = Path(__file__).resolve().parents[1]
-    log_config = service_root / "config" / "log" / "main_logging.yaml"
-    setup_logging(log_config, service_root)
+    torri_root = Path(__file__).resolve().parents[1]
+    log_config = torri_root / "config" / "log" / "main_logging.yaml"
+    # LOG_DIR lets compose override where rotating log files land (e.g. /app/logs).
+    # ephemeral/logs/server-debug.log is resolved relative to it.
+    log_dir = Path(os.getenv("LOG_DIR", str(torri_root)))
+    setup_logging(log_config, log_dir)
 
     logger = get_logger("torri.scheduler.main")
     logger.info("Starting Torii Scheduler")
