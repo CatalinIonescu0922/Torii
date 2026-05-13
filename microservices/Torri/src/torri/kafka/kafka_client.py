@@ -110,7 +110,7 @@ class KafkaConnection(threading.Thread):
 
     def eventDone(self):
         self.event_queue.task_done()
-        self.consumer.commit()
+        self.consumer.commit(asynchronous=True)
         
     def addEvent(self, data):
         self.event_queue.put(data)

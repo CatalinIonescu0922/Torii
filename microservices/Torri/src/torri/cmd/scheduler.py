@@ -107,15 +107,15 @@ def main():
     def _trigger_bridge():
         from shared.gerritmodel import GerritTriggerEvent
         while scheduler_queue.is_alive():
+            data = trigger_conn.getEvent(timeout=1.0)
+            if data is None:
+                continue
             try:
-                data = trigger_conn.getEvent(timeout=1.0)
-                if data is None:
-                    continue
                 event = GerritTriggerEvent.from_dict(data)
                 scheduler_queue.addEvent(event)
-                trigger_conn.eventDone()
             except Exception:
-                logger.exception("Error in trigger bridge")
+                logger.exception("Error in trigger bridge processing event: %s", data)
+            finally:
                 trigger_conn.eventDone()
 
     bridge_thread = threading.Thread(target=_trigger_bridge, name="TriggerBridge", daemon=True)
