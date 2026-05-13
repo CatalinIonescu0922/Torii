@@ -6,8 +6,8 @@ services:
       dockerfile: compose/Dockerfile
       target: scheduler
     container_name: torii_scheduler
-    # volumes:
-      # - ./logs/scheduler:/app/Torri/src/torri/ephemeral/logs
+    volumes:
+      - ./logs/scheduler:/app/logs
     networks:
       - torii
     depends_on:
@@ -18,6 +18,10 @@ services:
     environment:
       KAFKA_SERVER: kafka:9092
       REDIS_URL: redis://redis:6379/0
+    expose:
+      - "8000"
+    ports:
+      - "8000:8000"
 
   merger:
     pull_policy: build

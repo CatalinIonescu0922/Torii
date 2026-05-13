@@ -79,3 +79,11 @@ FROM runtime-base AS scheduler
 
 # Copy the custom supervisord configuration for the Scheduler
 COPY compose/files/supervisor/scheduler/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+COPY compose/files/supervisor/scheduler/status_api.conf /etc/supervisor/conf.d/status_api.conf
+
+# Bake the pipeline/project/job YAML files into the image.
+# These override whatever ships inside microservices/Torri so compose/files/torri/
+# stays the single source of truth for deployed configuration.
+COPY compose/files/torri/ /app/Torri/src/torri/config/layout/
+
+RUN mkdir -p /app/logs

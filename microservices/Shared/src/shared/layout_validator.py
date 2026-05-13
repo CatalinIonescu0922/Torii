@@ -11,7 +11,7 @@ import voluptuous as V
 import yaml
 import os
 import sys
-from model import known_events , known_labels
+from shared.gerritmodel import known_events, known_labels
 from pathlib import Path
 
 class Validator:

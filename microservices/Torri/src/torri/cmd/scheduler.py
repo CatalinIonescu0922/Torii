@@ -1,98 +1,111 @@
 from . import TorriCLI
-import uuid
 import os
-import json
-from confluent_kafka import Consumer, KafkaError
-from shared.merger_models import MergeRequest, MergeAction
-from torri.kafka.producer import KafkaProducerClient
+import time
+import yaml
+from pathlib import Path
 
-def run_server(args):
-    print("🚀 Torri Test Scheduler Booting Up...")
-    producer = KafkaProducerClient(os.getenv("KAFKA_SERVER", "localhost:9094"))
-    input_topic = os.getenv("KAFKA_MERGER_INPUT_TOPIC", "merger-requests")
-    output_topic = os.getenv("KAFKA_MERGER_OUTPUT_TOPIC", "merger-responses")
+import voluptuous as V
 
-    test_requests = [
-        # Job 1: ISOLATED - Single ref starting fresh from origin/master
-        MergeRequest(
-            job_id=f"job-{uuid.uuid4().hex[:8]}",
-            target_repository="gerrit:libraries/common-utils.git",
-            base_branch="master",
-            patchset_refs=["refs/changes/01/1/1"],
-            action=MergeAction.SPECULATIVE_MERGE,
-            strategy="rebase"
-        ),
-        
-        # Job 2: ISOLATED - Different single ref, also starts fresh from origin/master  
-        MergeRequest(
-            job_id=f"job-{uuid.uuid4().hex[:8]}",
-            target_repository="gerrit:libraries/common-utils.git",
-            base_branch="master",
-            patchset_refs=["refs/changes/02/2/1"],
-            action=MergeAction.SPECULATIVE_MERGE,
-            strategy="merge"
-        ),
-        
-        # Job 3: STACKED - Multiple refs composed together!
-        # Starts from origin/master, then:
-        # 1. Rebase refs/changes/01/1/1 on origin/master
-        # 2. On top of that result, cherry-pick refs/changes/02/2/2
-        # Result: single synthetic ref with BOTH changes stacked
-        MergeRequest(
-            job_id=f"job-{uuid.uuid4().hex[:8]}",
-            target_repository="gerrit:libraries/common-utils.git",
-            base_branch="master",
-            patchset_refs=["refs/changes/01/1/1", "refs/changes/02/2/1","refs/changes/03/3/1"],
-            action=MergeAction.SPECULATIVE_MERGE,
-            strategy="rebase"  # Strategy applies to ALL refs in this stack
-        ),
+from shared.logger_setup import get_logger, setup_logging
+from shared.layout_validator import Validator
+from torri.config.config_manager import ConfigurationManager
+from torri.kafka.kafka_client import KafkaConnection
+from torri.gerrit.gerritconnection import GerritEventProcessor, GerritRestConnection
+from torri.scheduler.scheduler_queue import SchedulerQueue
 
-        ]
 
-    for i, req in enumerate(test_requests):
-        print(f"📤 Sending Request {i+1}: {req.job_id} for repo: {req.target_repository.split('/')[-1]} with refs: {req.patchset_refs}")
-        producer.send_message(input_topic, key=req.job_id, value=req.model_dump(exclude_none=True))
-    
-    producer.flush()
-    print("\n👂 Waiting for responses from Merger...\n")
+def _validate_yaml_files(yaml_dir: str, logger):
+    """Validate all three YAML files before starting. Raises on bad config."""
+    logger.info("Validating YAML configuration files in %s", yaml_dir)
 
-    # Start consumer to read responses
-    consumer_config = {
-        'bootstrap.servers': os.getenv("KAFKA_SERVER", "localhost:9094"),
-        'group.id': "scheduler-test-group",
-        'auto.offset.reset': 'earliest'
-    }
-    consumer = Consumer(consumer_config)
-    consumer.subscribe([output_topic])
+    jobs_data = _load_yaml(yaml_dir, "jobs.yaml")
+    jobs_data, job_names = Validator.validate(jobs_data, "jobs.yaml")
 
-    responses_received = 0
-    try:
-        while responses_received < len(test_requests):
-            msg = consumer.poll(timeout=1.0)
-            if msg is None:
-                continue
-            if msg.error():
-                if msg.error().code() == KafkaError._PARTITION_EOF:
-                    continue
-                print(f"❌ Consumer error: {msg.error()}")
-                continue
-            
-            raw_data = json.loads(msg.value().decode('utf-8'))
-            print(f"📥 Received Response for Job [{raw_data.get('job_id')}]:")
-            print(f"   - Status: {raw_data.get('status')}")
-            print(f"   - Synthetic Ref (Merged Commit Hash): {raw_data.get('merged_commit_hash')}")
-            print(f"   - Error: {raw_data.get('error_message')}\n")
-            responses_received += 1
-            
-            consumer.commit(msg)
-    except KeyboardInterrupt:
-        print("Stopped.")
-    finally:
-        consumer.close()
+    pipelines_data = _load_yaml(yaml_dir, "pipelines.yaml")
+    pipelines_data, pipeline_names = Validator.validate(pipelines_data, "pipelines.yaml")
+
+    projects_data = _load_yaml(yaml_dir, "projects.yaml")
+    Validator.validate(
+        projects_data, "projects.yaml",
+        list_of_pipelines=pipeline_names,
+        list_of_jobs=job_names,
+    )
+
+    logger.info(
+        "YAML validation passed: %d jobs, %d pipelines, %d projects",
+        len(job_names), len(pipeline_names),
+        len(projects_data.get("projects", [])),
+    )
+
+
+def _load_yaml(yaml_dir: str, filename: str) -> dict:
+    path = os.path.join(yaml_dir, filename)
+    with open(path, "r") as f:
+        return yaml.safe_load(f) or {}
+
 
 def main():
-    cli = TorriCLI(description="Torri Scheduler (Test Mode)")
-    cli.run(run_server)
+    cli = TorriCLI("Torii Scheduler")
+    args = cli.parse_args()
 
-if __name__ == "__main__":
-    main()
+    # Setup logging using the config file next to torii.conf
+    service_root = Path(__file__).resolve().parents[3]
+    log_config = service_root / "config" / "log" / "main_logging.yaml"
+    setup_logging(log_config, service_root)
+
+    logger = get_logger("torri.scheduler.main")
+    logger.info("Starting Torii Scheduler")
+
+    config = ConfigurationManager()
+
+    # Resolve yaml_dir relative to torii.conf location so relative paths work
+    yaml_dir = config.scheduler_config_dir
+    if not os.path.isabs(yaml_dir):
+        yaml_dir = os.path.join(os.path.dirname(config.config_file), yaml_dir)
+    logger.info("Loading YAML config from %s", yaml_dir)
+
+    try:
+        _validate_yaml_files(yaml_dir, logger)
+    except V.Invalid as e:
+        logger.error("YAML configuration is invalid: %s", e)
+        raise SystemExit(1)
+
+    protocol = "https" if config.gerrit_rest_https else "http"
+    gerrit_base_url = f"{protocol}://{config.gerrit_server}:{config.gerrit_rest_port}"
+    gerrit_conn = GerritRestConnection(
+        gerrit_base_url,
+        auth=(config.gerrit_user, config.gerrit_password) if config.gerrit_password else None,
+    )
+
+    # Prefer the REDIS_URL env var the container injects; fall back to torii.conf values
+    redis_url = (
+        os.getenv("REDIS_URL")
+        or f"redis://{config.redis_host}:{config.redis_port}/{config.redis_db}"
+    )
+    scheduler_queue = SchedulerQueue(gerrit_conn, yaml_dir=yaml_dir, redis_url=redis_url)
+
+    # Wire the scheduler so GerritEventProcessor can deliver events to it
+    gerrit_conn.sched = scheduler_queue
+
+    kafka_conn = KafkaConnection()
+    kafka_conn.connect()
+
+    event_processor = GerritEventProcessor(kafka_conn, gerrit_conn)
+    event_processor.start()
+
+    scheduler_queue.start()
+    logger.info("Scheduler running. Waiting for events...")
+
+    try:
+        while scheduler_queue.is_alive():
+            time.sleep(1)
+    except KeyboardInterrupt:
+        logger.info("Shutdown signal received")
+    finally:
+        event_processor.stop()
+        scheduler_queue.stop()
+        logger.info("Scheduler stopped")
+
+
+def run_server(args):
+    pass

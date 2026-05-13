@@ -41,7 +41,7 @@ pipelines:
 
       trigger:
         gerrit:
-          - event: patchset-created
+          - event: comment-added
       success:
         gerrit:
           - Gatekeeper: 1

@@ -28,6 +28,8 @@ class GerritChange:
         self.needs_changes = []
         self.needed_by_changes = []
         self.author = ""
+        # label_name -> current vote value (int), e.g. {"Code-Review": 2, "Verified": 1}
+        self.labels = {}
 
     def update(self, data):
         revisions = data.get("revisions", {})
@@ -50,6 +52,15 @@ class GerritChange:
         owner = data.get("owner", {})
         self.author = str(owner.get("name", ""))
         self.url = ('%s/c/%s/+/%s' % (self.base_url , self.project , self.number))
+
+        # Each label entry has a "value" field with the current aggregate vote.
+        # If nobody voted yet the field is absent; default to 0.
+        raw_labels = data.get("labels", {})
+        self.labels = {
+            label_name: int(label_info.get("value", 0))
+            for label_name, label_info in raw_labels.items()
+            if isinstance(label_info, dict)
+        }
         
     def __repr__(self):
         return '<Change 0x%x %s %s>' % (id(self) , self.project ,self.number)
