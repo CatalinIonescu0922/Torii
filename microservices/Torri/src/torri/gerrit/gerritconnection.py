@@ -2,7 +2,6 @@ import json
 import os
 import requests
 import threading
-from cachetools import LRUCache
 from shared.logger_setup import get_logger
 from shared.exceptions import GerritQueryError
 from queue import Empty
@@ -86,15 +85,10 @@ class GerritEventProcessor(threading.Thread):
 
     def _on_enrichment_done(self, future, event):
         try:
-            event.change_details = future.result()
-            self.logger.debug(
-                "Enrichment done for change=%s has_details=%s",
-                event.change_number,
-                event.change_details is not None,
-            )
-            data = json.dumps(event)
-            encode_data = data.encode('utf-8')
-            self.logger.debug(f"true size of the event is {len(encode_data)}")
+            # result is a GerritChange now stored in gerrit_conn's LRU cache.
+            # The scheduler will fetch it from there — no need to ship it through Kafka.
+            future.result()
+            self.logger.debug("Enrichment done for change=%s", event.change_number)
             self._dispatch_event(event)
         except Exception as exc:
             self.logger.error(
@@ -205,17 +199,15 @@ class ChangeNetworkManager:
 
 class GerritRestConnection(BaseConnection):
     """REST client for querying Gerrit changes."""
-    GERRIT_CHANGE_CACHE_SIZE = 10_000
 
-    def __init__(self, base_url, auth=None):
+    def __init__(self, base_url, auth=None, redis=None):
         self.logger = get_logger("torri.connection.gerrit")
         self.base_url = base_url.rstrip("/")
         self.session = requests.Session()
         self._authenticated = auth is not None
         if auth:
             self.session.auth = auth
-        self.change_cache_rest_api = LRUCache(maxsize=self.GERRIT_CHANGE_CACHE_SIZE)
-        self.cache_lock = threading.RLock()
+        self.redis = redis
         self._network_manager = ChangeNetworkManager()
         self.executor = ThreadPoolExecutor(max_workers=5)
         self.logger.debug(
@@ -406,40 +398,33 @@ class GerritRestConnection(BaseConnection):
             text = text[4:]
         return json.loads(text)
 
-    def _change_key(self, change_number, change_patchset=None):
-        return (str(change_number), None if change_patchset is None else str(change_patchset))
-
     def _getChange(self, change_number, change_patchset=None, refresh=False, history=None):
-        key = self._change_key(change_number, change_patchset)
+        if not refresh and self.redis:
+            change = self.redis.get_change(change_number, change_patchset)
+            if change:
+                self.logger.debug("Redis hit for change=%s patchset=%s", change_number, change_patchset)
+                return change
 
-        change = self.getChangeFromCache(key)
-        if change is not None and not refresh:
-            self.logger.debug("Cache hit for key=%s", key)
-            return change
-
-        self.logger.debug("Cache miss or refresh for key=%s refresh=%s", key, refresh)
+        self.logger.debug("Redis miss for change=%s patchset=%s refresh=%s", change_number, change_patchset, refresh)
 
         should_fetch, payload = self._network_manager.begin(str(change_number))
         self.logger.debug("Network manager state=%s change=%s", should_fetch, change_number)
         if should_fetch == 'inflight':
             self.logger.warning("Circular dependency on change %s, returning in-flight object.", change_number)
-            return payload or self.getChangeFromCache(key)
+            return payload or GerritChange()
         if should_fetch == 'wait':
             self.logger.debug("Waiting for in-flight fetch on change=%s", change_number)
             payload.wait()
             self._network_manager.end_wait()
-            return self.getChangeFromCache(key)
+            if self.redis:
+                change = self.redis.get_change(change_number, change_patchset)
+                if change:
+                    return change
+            return GerritChange()
 
         # should_fetch == 'fetch'
         try:
-            change = self.getChangeFromCache(key)
-            if change is not None and not refresh:
-                return change
-
-            if change is None:
-                change = GerritChange()
-                self.addChangeToCache(key, change)
-
+            change = GerritChange()
             self._network_manager.register(str(change_number), change)
             self.logger.debug("Fetching and updating change=%s patchset=%s", change_number, change_patchset)
             return self._updateChange(change, change_number, change_patchset, history=history)
@@ -496,8 +481,8 @@ class GerritRestConnection(BaseConnection):
             if str(nb_num) not in history:
                 change.needed_by_changes.append(self._getChange(nb_num, nb_patchset, history=history))
 
-        with self.cache_lock:
-            self.change_cache_rest_api[self._change_key(change_number, change_patchset)] = change
+        if self.redis:
+            self.redis.store_change(change.number, change.patchset, change)
         self.logger.debug(
             "Updated change=%s needs=%s needed_by=%s",
             change_number,
@@ -507,15 +492,3 @@ class GerritRestConnection(BaseConnection):
 
         return change
 
-    def addChangeToCache(self, key, value):
-        with self.cache_lock:
-            if key in self.change_cache_rest_api:
-                return self.change_cache_rest_api[key]
-            self.change_cache_rest_api[key] = value
-            return value
-
-    def getChangeFromCache(self, key):
-        with self.cache_lock:
-            if key in self.change_cache_rest_api:
-                return self.change_cache_rest_api[key]
-        return None

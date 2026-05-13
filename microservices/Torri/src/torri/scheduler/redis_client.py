@@ -6,6 +6,7 @@ Simple sync client following torri patterns.
 
 import os
 import json
+import pickle
 import redis
 from typing import Optional, Dict, Any, List
 from datetime import datetime
@@ -22,6 +23,8 @@ class TorriRedis:
         self.logger = get_logger("torri.scheduler.redis")
         url = redis_url or os.getenv("REDIS_URL", "redis://localhost:6379/0")
         self.client = redis.from_url(url, decode_responses=True)
+        # Separate client for binary (pickle) data — decode_responses must be False
+        self._binary_client = redis.from_url(url, decode_responses=False)
         
         try:
             self.client.ping()
@@ -184,6 +187,41 @@ class TorriRedis:
         except Exception as e:
             self.logger.error("Error checking existence of %s: %s", key, e)
             return False
+
+    # 7 days — long enough to survive a weekend; short enough to self-clean stale data
+    _CHANGE_TTL = 7 * 24 * 60 * 60
+
+    def store_change(self, change_number, patchset, change) -> None:
+        """
+        Persist a GerritChange object to Redis using pickle.
+
+        Stored under two keys:
+          torri:change:{number}:{patchset}  — versioned, precise lookup
+          torri:change:{number}             — always the latest patchset
+        """
+        data = pickle.dumps(change)
+        versioned_key = f"torri:change:{change_number}:{patchset}"
+        latest_key = f"torri:change:{change_number}"
+        self._binary_client.setex(versioned_key, self._CHANGE_TTL, data)
+        self._binary_client.setex(latest_key, self._CHANGE_TTL, data)
+
+    def get_change(self, change_number, patchset=None):
+        """
+        Retrieve a GerritChange object from Redis.
+
+        When patchset is given, reads the versioned key.
+        When patchset is None, reads the latest-patchset key.
+        Returns None when the change is not cached.
+        """
+        key = (
+            f"torri:change:{change_number}:{patchset}"
+            if patchset is not None
+            else f"torri:change:{change_number}"
+        )
+        data = self._binary_client.get(key)
+        if data is None:
+            return None
+        return pickle.loads(data)
 
 
 # Redis key naming patterns (const patterns)

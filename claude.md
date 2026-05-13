@@ -4,6 +4,23 @@ Torii is a CI/CD scheduler that mimics what Zuul does: it listens to Gerrit even
 
 ---
 
+## Configuration Structure
+
+Two files own all configuration. Never put runtime config in env vars, and never put build-time secrets in the conf file.
+
+| What | Where | Examples |
+|------|-------|---------|
+| Runtime config for containers | `microservices/Torri/src/torri/config/torii.conf` | Redis URL, Gerrit base URL, Kafka topics, ports, paths |
+| Build/bootstrap variables for Docker Compose | `compose/default.env` | Image tags, Gerrit admin credentials used by setup scripts, Docker Compose version pins |
+
+Rules:
+- A value a running container reads to do its job → `torii.conf`.
+- A value only needed to build, provision, or bootstrap the environment → `default.env`.
+- `torii.conf` is the single source of truth for all service-to-service URLs (`base_url`, `redis_url`, etc.). No URL assembly scattered across Python entry points.
+- `config_manager.py` exposes every `torii.conf` value as a typed property. Entry points (`cmd/scheduler.py` etc.) call `config.*` — they never build URLs or read `os.getenv` for runtime settings.
+
+---
+
 ## Coding Guidelines
 
 - Keep it simple. If you can't explain it to a 7 year old, it is too complex.

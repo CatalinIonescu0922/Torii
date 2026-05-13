@@ -12,6 +12,8 @@ from shared.layout_validator import Validator
 from torri.config.config_manager import ConfigurationManager
 from torri.kafka.kafka_client import KafkaConnection
 from torri.gerrit.gerritconnection import GerritEventProcessor, GerritRestConnection
+from torri.gerrit.gerritsource import GerritSource
+from torri.scheduler.redis_client import TorriRedis
 from torri.scheduler.scheduler_queue import SchedulerQueue
 
 
@@ -74,9 +76,11 @@ def main():
     gerrit_conn = GerritRestConnection(
         config.gerrit_base_url,
         auth=(config.gerrit_user, config.gerrit_password) if config.gerrit_password else None,
+        redis=TorriRedis(config.redis_url),
     )
+    source = GerritSource(connection=gerrit_conn, redis=gerrit_conn.redis)
 
-    scheduler_queue = SchedulerQueue(gerrit_conn, yaml_dir=yaml_dir, redis_url=config.redis_url)
+    scheduler_queue = SchedulerQueue(gerrit_conn, source, yaml_dir=yaml_dir, redis_url=config.redis_url)
 
     # gerrit-stream-events: raw Gerrit events → GerritEventProcessor enriches and
     # publishes to trigger-events.

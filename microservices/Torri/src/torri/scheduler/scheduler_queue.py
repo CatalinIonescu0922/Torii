@@ -24,11 +24,12 @@ from torri.scheduler.status_writer import refresh_status
 class SchedulerQueue(threading.Thread):
     """Main scheduler thread that processes events and routes to pipelines."""
 
-    def __init__(self, gerrit_conn, yaml_dir: str, redis_url: Optional[str] = None):
+    def __init__(self, gerrit_conn, source, yaml_dir: str, redis_url: Optional[str] = None):
         super().__init__(daemon=True, name="SchedulerQueue")
         self.logger = get_logger("torri.scheduler.queue")
 
         self.gerrit_conn = gerrit_conn
+        self.source = source
         self.yaml_dir = yaml_dir
         self.redis = TorriRedis(redis_url)
 
@@ -195,8 +196,8 @@ class SchedulerQueue(threading.Thread):
             self.logger.error("Error processing event: %s", e, exc_info=True)
 
     def _change_meets_requirements(self, event: GerritTriggerEvent, pipeline_config: PipelineConfig) -> bool:
-        """Check open/current-patchset/label requirements against enriched change data."""
-        change = event.change_details
+        """Check open/current-patchset/label requirements against the cached change."""
+        change = self.source.getChange(event.change_number, event.patch_number)
 
         if pipeline_config.require_open:
             if change is None or change.status != "NEW":

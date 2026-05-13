@@ -92,24 +92,6 @@ class GerritTriggerEvent:
         self.change_details = None
 
     def to_dict(self) -> dict:
-        change = None
-        if self.change_details is not None:
-            c = self.change_details
-            change = {
-                "base_url": c.base_url,
-                "project": c.project,
-                "branch": c.branch,
-                "id": c.id,
-                "number": c.number,
-                "patchset": c.patchset,
-                "subject": c.subject,
-                "url": c.url,
-                "status": c.status,
-                "wip": c.wip,
-                "private": c.private,
-                "author": c.author,
-                "labels": c.labels,
-            }
         return {
             "type": self.type,
             "project_name": self.project_name,
@@ -120,7 +102,6 @@ class GerritTriggerEvent:
             "ref": self.ref,
             "oldrev": self.oldrev,
             "newrev": self.newrev,
-            "change_details": change,
         }
 
     @classmethod
@@ -135,23 +116,6 @@ class GerritTriggerEvent:
         event.ref = data.get("ref", "")
         event.oldrev = data.get("oldrev", "")
         event.newrev = data.get("newrev", "")
-        raw_change = data.get("change_details")
-        if raw_change:
-            c = GerritChange()
-            c.base_url = raw_change.get("base_url", "")
-            c.project = raw_change.get("project", "")
-            c.branch = raw_change.get("branch", "")
-            c.id = raw_change.get("id", "")
-            c.number = raw_change.get("number", 0)
-            c.patchset = raw_change.get("patchset", 0)
-            c.subject = raw_change.get("subject", "")
-            c.url = raw_change.get("url", "")
-            c.status = raw_change.get("status", "")
-            c.wip = raw_change.get("wip", False)
-            c.private = raw_change.get("private", False)
-            c.author = raw_change.get("author", "")
-            c.labels = raw_change.get("labels", {})
-            event.change_details = c
         return event
 
 
