@@ -4,7 +4,7 @@ import threading
 from typing import Optional
 from confluent_kafka import Consumer, KafkaError
 from shared.logger_setup import get_logger
-from queue import Queue
+from queue import Queue, Empty
 from typing import Any
 class KafkaConnection(threading.Thread):
     """
@@ -102,8 +102,11 @@ class KafkaConnection(threading.Thread):
     def get_event_queue(self) -> Queue:
         """Return the shared queue populated by the Kafka polling thread."""
         return self.event_queue
-    def getEvent(self, timeout=None) -> dict[str, Any]:
-        return self.event_queue.get(timeout=timeout)
+    def getEvent(self, timeout=None) -> dict[str, Any] | None:
+        try:
+            return self.event_queue.get(timeout=timeout)
+        except Empty:
+            return None
 
     def eventDone(self):
         self.event_queue.task_done()

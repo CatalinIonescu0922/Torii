@@ -13,9 +13,6 @@ pipelines:
       require:
         open: true
         current-patchset: true
-        approval:
-          - code-review: 2
-          - verified: 1
       reject:
         approval:
           - integrated: [-2, -1]
