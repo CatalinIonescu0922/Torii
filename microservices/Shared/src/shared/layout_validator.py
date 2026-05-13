@@ -117,6 +117,7 @@ class Validator:
             V.Optional('reject') : reject_detail_schema,
             V.Optional('start-message') : V.Any(str, None),
             V.Optional('failure-message') : V.Any(str, None),
+            V.Optional("success-message") : V.Any(str, None),
             V.Optional(V.Any('success','failure','start')) : gerrit_pipeline_result
         }
         pipeline_file_schema = V.Schema({
