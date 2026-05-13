@@ -1,7 +1,7 @@
 known_events = [
-    'patchset-created', 'comment-added', 'change-merged', 
-    'change-abandoned', 'change-restored', 'ref-updated', 
-    'wip-state-changed', 'private-state-changed'
+    'patchset-created', 'comment-added', 'change-merged',
+    'change-abandoned', 'change-restored', 'ref-updated',
+    'wip-state-changed', 'private-state-changed', 'reviewer-added'
 ]
 
 known_labels = [
