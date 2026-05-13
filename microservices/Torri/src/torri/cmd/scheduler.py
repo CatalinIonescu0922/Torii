@@ -106,17 +106,21 @@ def main():
     # Bridge: read GerritTriggerEvent dicts from trigger_conn and feed the scheduler.
     def _trigger_bridge():
         from shared.gerritmodel import GerritTriggerEvent
+        logger.info("TriggerBridge started")
         while scheduler_queue.is_alive():
             data = trigger_conn.getEvent(timeout=1.0)
             if data is None:
                 continue
+            logger.debug("TriggerBridge received: type=%s change=%s", data.get("type"), data.get("change_number"))
             try:
                 event = GerritTriggerEvent.from_dict(data)
                 scheduler_queue.addEvent(event)
+                logger.debug("TriggerBridge queued event change=%s to scheduler", event.change_number)
             except Exception:
                 logger.exception("Error in trigger bridge processing event: %s", data)
             finally:
                 trigger_conn.eventDone()
+        logger.warning("TriggerBridge exiting — scheduler_queue is no longer alive")
 
     bridge_thread = threading.Thread(target=_trigger_bridge, name="TriggerBridge", daemon=True)
     bridge_thread.start()
