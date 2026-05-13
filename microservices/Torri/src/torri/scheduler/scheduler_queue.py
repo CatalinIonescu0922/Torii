@@ -177,9 +177,7 @@ class SchedulerQueue(threading.Thread):
 
                 def on_done(succeeded, _pc=captured_pipeline_config, _ps=captured_patchset):
                     labels = _pc.success_labels if succeeded else _pc.failure_labels
-                    message = (
-                        f"{_pc.name} pipeline {'succeeded' if succeeded else 'failed'}"
-                    )
+                    message = _pc.success_message if succeeded else _pc.failure_message
                     if _ps and labels:
                         self.gerrit_conn.set_review(
                             change_id, _ps, message=message, labels=labels
