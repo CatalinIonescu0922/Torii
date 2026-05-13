@@ -71,19 +71,12 @@ def main():
         logger.error("YAML configuration is invalid: %s", e)
         raise SystemExit(1)
 
-    protocol = "https" if config.gerrit_rest_https else "http"
-    gerrit_base_url = f"{protocol}://{config.gerrit_server}:{config.gerrit_rest_port}"
     gerrit_conn = GerritRestConnection(
-        gerrit_base_url,
+        config.gerrit_base_url,
         auth=(config.gerrit_user, config.gerrit_password) if config.gerrit_password else None,
     )
 
-    # Prefer the REDIS_URL env var the container injects; fall back to torii.conf values
-    redis_url = (
-        os.getenv("REDIS_URL")
-        or f"redis://{config.redis_host}:{config.redis_port}/{config.redis_db}"
-    )
-    scheduler_queue = SchedulerQueue(gerrit_conn, yaml_dir=yaml_dir, redis_url=redis_url)
+    scheduler_queue = SchedulerQueue(gerrit_conn, yaml_dir=yaml_dir, redis_url=config.redis_url)
 
     # gerrit-stream-events: raw Gerrit events → GerritEventProcessor enriches and
     # publishes to trigger-events.

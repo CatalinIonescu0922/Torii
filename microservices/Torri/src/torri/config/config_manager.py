@@ -116,19 +116,10 @@ class ConfigurationManager:
     # ============================================================
     
     @property
-    def redis_host(self) -> str:
-        """Redis server hostname."""
-        return self._get_value('connection redis', 'host', 'localhost')
-    
-    @property
-    def redis_port(self) -> int:
-        """Redis server port."""
-        return self._get_int('connection redis', 'port', 6379)
-    
-    @property
-    def redis_db(self) -> int:
-        """Redis database number."""
-        return self._get_int('connection redis', 'db', 0)
+    def redis_url(self) -> str:
+        """Full Redis connection URL. Reads url from [connection redis] or assembles from host/port/db."""
+        fallback = f"redis://{self._get_value('connection redis', 'host', 'localhost')}:{self._get_int('connection redis', 'port', 6379)}/{self._get_int('connection redis', 'db', 0)}"
+        return self._get_value('scheduler', 'redis_url', None) or self._get_value('connection redis', 'url', fallback)
     
     @property
     def redis_password(self) -> Optional[str]:
@@ -174,6 +165,13 @@ class ConfigurationManager:
     def gerrit_rest_https(self) -> bool:
         """Use HTTPS for Gerrit REST API."""
         return self._get_bool('connection gerrit', 'gerrit_rest_https', False)
+
+    @property
+    def gerrit_base_url(self) -> str:
+        """Full base URL for the Gerrit REST API, including any path prefix."""
+        protocol = 'https' if self.gerrit_rest_https else 'http'
+        fallback = f"{protocol}://{self.gerrit_server}:{self.gerrit_rest_port}"
+        return self._get_value('connection gerrit', 'base_url', fallback)
     
     @property
     def gerrit_rest_url(self) -> str:
