@@ -79,9 +79,15 @@ class GerritEventProcessor(threading.Thread):
         )
 
         if event.change_number:
-            self.logger.debug("Submitting change enrichment for change=%s", event.change_number)
+            # comment-added means a vote just changed — the cached change has stale labels.
+            # Force a REST refresh so _change_meets_requirements sees the current votes.
+            force_refresh = (event.type == "comment-added")
+            self.logger.debug(
+                "Submitting change enrichment for change=%s refresh=%s",
+                event.change_number, force_refresh,
+            )
             future = self.gerrit_connection.executor.submit(
-                self.gerrit_connection.getChange, event.change_number
+                self.gerrit_connection.getChange, event.change_number, None, force_refresh
             )
             future.add_done_callback(lambda f: self._on_enrichment_done(f, event))
         else:
