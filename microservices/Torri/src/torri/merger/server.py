@@ -121,9 +121,8 @@ class KafkaConsumerWorker:
                     for idx, ref in enumerate(request.patchset_refs)
                 ]
                 
-                # DEBUG: Log the items as received from Kafka
-                job_logger.info("📮 Received from Kafka - patchset_refs order: %s", request.patchset_refs)
-                job_logger.info("📮 Created items with indices: %s", [(item.patchset_ref, item.index) for item in items])
+                job_logger.info("Received patchset_refs order: %s", request.patchset_refs)
+                job_logger.info("Created items with indices: %s", [(item.patchset_ref, item.index) for item in items])
                 
                 # Orchestrate: this handles state hygiene, GC protection, and Checkpoint rollbacks safely
                 # Uses cache orchestrator which keeps repos for reuse across jobs

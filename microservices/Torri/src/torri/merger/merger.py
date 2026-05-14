@@ -82,14 +82,20 @@ class Merger:
         Restore packed-refs via manipulation after a failed stack.
         Re-applies the base state avoiding heavy disk checkouts.
         """
+        if not state:
+            # Repo had no commits when the checkpoint was taken (e.g. first fetch failed).
+            # There is nothing to restore - skip entirely to avoid operating on an empty repo.
+            return
         self.logger.warning("Restoring repo state from checkpoint on failed speculative stack...")
         for ref, sha in state.items():
             try:
                 repo._run_git(['update-ref', ref, sha])
             except GitCommandError:
                 pass
-        # Final cleanup safety
-        repo._run_git(['reset', '--hard', 'HEAD'])
+        try:
+            repo._run_git(['reset', '--hard', 'HEAD'])
+        except GitCommandError:
+            self.logger.warning("reset --hard HEAD failed after state restore - repo may be in inconsistent state")
 
     def mergeChanges(self, items: List[SpeculativeMergeItem]) -> Dict[str, str]:
         """
@@ -118,8 +124,7 @@ class Merger:
                 repo = self._get_repo(target_repo_url, repo_items[0].repo_name)
                 repo_name = repo_items[0].repo_name
                 
-                # DEBUG: Log items before sorting
-                self.logger.info("🔍 Items BEFORE sort (from Kafka): %s", [(item.patchset_ref, item.index) for item in repo_items])
+                self.logger.debug("Items before sort: %s", [(item.patchset_ref, item.index) for item in repo_items])
                 
                 # Checkpoint ONCE for this repo (before any merges in this group)
                 state_checkpoints[repo_name] = self._saveRepoState(repo)
@@ -132,7 +137,7 @@ class Merger:
                 # Ensure refs are processed in EXACT original order (left-to-right)
                 # Sort by index which tracks position in the original patchset_refs list
                 ordered_items = sorted(repo_items, key=lambda x: x.index)
-                self.logger.info("🔍 Items AFTER sort (should be left-to-right): %s", [(item.patchset_ref, item.index) for item in ordered_items])
+                self.logger.debug("Items after sort: %s", [(item.patchset_ref, item.index) for item in ordered_items])
                 self.logger.debug("Processing %d items in order: %s", len(ordered_items), [item.patchset_ref for item in ordered_items])
                 
                 # Now stack all refs from this job ON TOP of each other
@@ -140,10 +145,9 @@ class Merger:
                 for idx, item in enumerate(ordered_items):
                     # First ref detaches to origin/base_branch, subsequent refs stack ON TOP
                     detach_first = (idx == 0)
-                    self.logger.info("🔄 Applying ref #%d: %s (strategy=%s, detach=%s)", idx+1, item.patchset_ref, item.strategy, detach_first)
+                    self.logger.info("Applying ref %d/%d: %s (strategy=%s)", idx+1, len(ordered_items), item.patchset_ref, item.strategy)
                     final_hash = repo.merge_patchset(item.patchset_ref, strategy=item.strategy, base_branch=base_branch, detach_to_base=detach_first)
-                    self.logger.debug("✅ Stacked ref %d/%d: %s -> %s (strategy=%s, detach=%s)", 
-                                     idx+1, len(repo_items), item.patchset_ref, final_hash, item.strategy, detach_first)
+                    self.logger.debug("Stacked ref %d/%d: %s -> %s", idx+1, len(repo_items), item.patchset_ref, final_hash)
                     
                     # Create intermediate synthetic ref for debugging (optional, but useful)
                     # This allows tracking individual refs in the stack

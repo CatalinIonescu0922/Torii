@@ -148,7 +148,16 @@ class SchedulerQueue(threading.Thread):
                     self.logger.warning("Pipeline %s not found", pipeline_name)
                     continue
 
-                if not self._change_meets_requirements(event, pipeline_config):
+                passed, rejection_reason = self._change_meets_requirements(event, pipeline_config)
+                if not passed:
+                    reject_key = f"torri:rejected:{pipeline_name}:{change_id}:{event.patch_number}"
+                    if self.redis.client.setnx(reject_key, rejection_reason):
+                        self.redis.client.expire(reject_key, 86400)
+                        if event.patch_number:
+                            self.gerrit_conn.set_review(
+                                change_id, event.patch_number,
+                                message=f"[Torii] Not entering {pipeline_name}: {rejection_reason}",
+                            )
                     continue
 
                 # One-shot guard: if we've already started this change in this pipeline
@@ -244,7 +253,7 @@ class SchedulerQueue(threading.Thread):
                 merge_job_id = f"{pipeline_name}:{change_id}:{event.patch_number}"
                 request_merge(
                     job_id=merge_job_id,
-                    project=project_name,
+                    project=f"{self.gerrit_conn.base_url}/{project_name}",
                     branch=branch,
                     patchset_refs=[captured_ref],
                     on_done=on_merge_done,
@@ -253,30 +262,39 @@ class SchedulerQueue(threading.Thread):
         except Exception as e:
             self.logger.error("Error processing event: %s", e, exc_info=True)
 
-    def _change_meets_requirements(self, event: GerritTriggerEvent, pipeline_config: PipelineConfig) -> bool:
-        """Check open/current-patchset/label requirements against the cached change."""
+    def _change_meets_requirements(self, event: GerritTriggerEvent, pipeline_config: PipelineConfig) -> tuple[bool, str]:
+        """Check open/current-patchset/label requirements against the cached change.
+
+        Returns (True, "") if the change qualifies.
+        Returns (False, reason) if it does not, where reason is a human-readable
+        explanation suitable for posting as a Gerrit comment.
+        """
         change = self.source.getChange(event.change_number, event.patch_number)
 
         if pipeline_config.require_open:
             if change is None or change.status != "NEW":
+                status = change.status if change else "unknown"
                 self.logger.info(
                     "Change %s rejected from pipeline %s: not open (status=%s)",
-                    event.change_number, pipeline_config.name,
-                    change.status if change else "unknown",
+                    event.change_number, pipeline_config.name, status,
                 )
-                return False
+                return False, f"Change is not open (status: {status})"
 
         if pipeline_config.require_current_patchset:
             if change is None or event.patch_number != str(change.patchset):
+                latest = change.patchset if change else "unknown"
                 self.logger.info(
                     "Change %s rejected from pipeline %s: not current patchset (event=%s latest=%s)",
                     event.change_number, pipeline_config.name,
-                    event.patch_number, change.patchset if change else "unknown",
+                    event.patch_number, latest,
                 )
-                return False
+                return False, (
+                    f"Patchset {event.patch_number} is not the current patchset "
+                    f"(latest: {latest})"
+                )
 
         if change is None:
-            return False
+            return False, "Change not found"
 
         # Check required labels — each must meet or exceed the required value
         for label_name, required_value in pipeline_config.required_approvals.items():
@@ -287,7 +305,10 @@ class SchedulerQueue(threading.Thread):
                     event.change_number, pipeline_config.name,
                     label_name, current_value, required_value,
                 )
-                return False
+                return False, (
+                    f"Missing required vote: {label_name} is {current_value:+d}, "
+                    f"need {required_value:+d}"
+                )
 
         # Check reject labels — if any match, block the change
         for label_name, reject_value in pipeline_config.reject_approvals.items():
@@ -303,8 +324,8 @@ class SchedulerQueue(threading.Thread):
                     event.change_number, pipeline_config.name,
                     label_name, current_value,
                 )
-                return False
+                return False, f"Blocked by vote: {label_name}={current_value:+d}"
 
-        return True
+        return True, ""
     
 

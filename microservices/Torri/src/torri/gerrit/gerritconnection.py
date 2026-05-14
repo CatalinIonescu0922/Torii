@@ -34,6 +34,9 @@ class GerritEventProcessor(threading.Thread):
             self.logger.debug("Skip unknown event type=%s", event.type)
             return None
         event.comment = str(data.get("comment", ""))
+        if event.type == "comment-added" and "[Torii]" in event.comment:
+            self.logger.debug("Ignoring self-generated [Torii] comment event")
+            return None
 
         change = data.get("change")
         if isinstance(change, dict):
@@ -82,8 +85,7 @@ class GerritEventProcessor(threading.Thread):
             )
             future.add_done_callback(lambda f: self._on_enrichment_done(f, event))
         else:
-            self.logger.debug("Event has no change number, dispatching directly")
-            self._dispatch_event(event)
+            self.logger.debug("Event type=%s has no change number — not forwarding to scheduler", event.type)
             self.kafka_connection.eventDone()
 
     def _on_enrichment_done(self, future, event):

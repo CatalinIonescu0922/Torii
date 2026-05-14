@@ -6,9 +6,9 @@ pipelines:
   - pipeline:
       name: check
       manager: independent
-      start-message : "Starting check jobs"
-      failure-message: "Check failed"
-      success-message: "Check succeded"
+      start-message: "[Torii] Starting check jobs"
+      failure-message: "[Torii] Check failed"
+      success-message: "[Torii] Check succeeded"
 
       require:
         open: true
@@ -29,9 +29,9 @@ pipelines:
 
   - pipeline:
       name: gate
-      start-message : "Starting gate jobs"
-      failure-message: "Gate failed"
-      success-message: "Gate succeded"
+      start-message: "[Torii] Starting gate jobs"
+      failure-message: "[Torii] Gate failed"
+      success-message: "[Torii] Gate succeeded"
       manager: dependent
       require:
         open: true

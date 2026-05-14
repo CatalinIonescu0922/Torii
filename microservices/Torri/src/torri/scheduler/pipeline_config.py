@@ -20,9 +20,9 @@ class PipelineConfig:
     def __init__(self, config_dict: dict):
         self.name = config_dict.get('name')
         self.manager = config_dict.get('manager')  # independent or dependent
-        self.start_message = config_dict.get('start-message', f'Starting {self.name} pipeline')
-        self.success_message = config_dict.get('success-message', f'{self.name} pipeline succeeded')
-        self.failure_message = config_dict.get('failure-message', f'{self.name} pipeline failed')
+        self.start_message = config_dict.get('start-message', f'[Torii] Starting {self.name} pipeline')
+        self.success_message = config_dict.get('success-message', f'[Torii] {self.name} pipeline succeeded')
+        self.failure_message = config_dict.get('failure-message', f'[Torii] {self.name} pipeline failed')
         
         # Requirements
         require_dict = config_dict.get('require', {})
