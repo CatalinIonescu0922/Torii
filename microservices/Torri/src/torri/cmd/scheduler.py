@@ -122,10 +122,11 @@ def main():
                 trigger_conn.eventDone()
         logger.warning("TriggerBridge exiting — scheduler_queue is no longer alive")
 
+    scheduler_queue.start()
+
     bridge_thread = threading.Thread(target=_trigger_bridge, name="TriggerBridge", daemon=True)
     bridge_thread.start()
 
-    scheduler_queue.start()
     logger.info("Scheduler running. Waiting for events...")
 
     try:
