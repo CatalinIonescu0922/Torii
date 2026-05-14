@@ -14,7 +14,7 @@ from shared.gerritmodel import GerritTriggerEvent
 from torri.scheduler.redis_client import TorriRedis
 from torri.scheduler.pipeline_config import PipelineConfigLoader, PipelineConfig
 from torri.scheduler.pipeline_manager import (
-    BasePipelineManager, CheckPipeline, GatePipeline,
+    BasePipelineManager, IndependentPipeline, DependentPipeline,
     ChangeInfoModel, ChangeState
 )
 from torri.scheduler.job_runner import launch_jobs
@@ -87,9 +87,9 @@ class SchedulerQueue(threading.Thread):
 
             for name, pipeline_config in self.pipeline_configs.items():
                 if pipeline_config.manager == 'dependent':
-                    self.pipelines[name] = GatePipeline(name, self.redis, self.gerrit_conn)
+                    self.pipelines[name] = DependentPipeline(name, self.redis, self.gerrit_conn)
                 else:
-                    self.pipelines[name] = CheckPipeline(name, self.redis)
+                    self.pipelines[name] = IndependentPipeline(name, self.redis)
                 self.logger.info("Initialized pipeline %s (manager=%s)", name, pipeline_config.manager)
 
             projects_path = os.path.join(self.yaml_dir, 'projects.yaml')
@@ -173,7 +173,7 @@ class SchedulerQueue(threading.Thread):
                 # TTL: 24 h — change should be resolved long before that
                 self.redis.client.expire(start_key, 86400)
 
-                if isinstance(pipeline, GatePipeline):
+                if isinstance(pipeline, DependentPipeline):
                     queue_pos = pipeline.enqueue_change(change_id, project_name, branch)
                 else:
                     queue_pos = pipeline.enqueue_change(change_id)
@@ -198,6 +198,7 @@ class SchedulerQueue(threading.Thread):
                 captured_pipeline_config = pipeline_config
                 captured_patchset = event.patch_number
                 captured_ref = event.ref  # patchset git ref e.g. refs/changes/01/1/1
+                captured_is_gate = isinstance(pipeline, DependentPipeline)
 
                 def on_done(
                     succeeded,
@@ -205,6 +206,7 @@ class SchedulerQueue(threading.Thread):
                     _ps=captured_patchset,
                     _cid=change_id,
                     _pname=pipeline_name,
+                    _is_gate=captured_is_gate,
                 ):
                     labels = _pc.success_labels if succeeded else _pc.failure_labels
                     message = _pc.success_message if succeeded else _pc.failure_message
@@ -212,6 +214,9 @@ class SchedulerQueue(threading.Thread):
                         self.gerrit_conn.set_review(_cid, _ps, message=message, labels=labels)
                     elif _ps:
                         self.gerrit_conn.set_review(_cid, _ps, message=message)
+                    if _is_gate and succeeded:
+                        self.logger.info("Gate pipeline succeeded for change %s — submitting to Gerrit", _cid)
+                        self.gerrit_conn.submit_change(_cid)
                     refresh_status(self.redis, list(self.pipeline_configs.keys()))
 
                 def on_merge_done(

@@ -287,7 +287,7 @@ class GerritRestConnection(BaseConnection):
                 payload['strategy'] = strategy
             
             # Empty payload = use repo's default strategy
-            response = self._post(endpoint, payload if payload else None)
+            response = self._post(endpoint, payload)
             
             status = response.get('status')  # MERGED, ABANDONED, etc.
             self.logger.info(

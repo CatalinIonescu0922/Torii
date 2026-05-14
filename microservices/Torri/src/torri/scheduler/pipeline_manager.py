@@ -1,11 +1,9 @@
 """
 Pipeline management for Torri scheduler.
 
-Implements:
-- BasePipelineManager: Base class for all pipeline types
-- CheckPipeline: Verification/linting pipeline (no merge)
-- GatePipeline: Merge-blocking pipeline (can trigger merge)
-- ReportPipeline: Post-merge reporting pipeline
+Two manager types, set via the 'manager' field in pipelines.yaml:
+- independent: each change is tested on its own, no merge (e.g. check)
+- dependent:   changes are tested speculatively and merged in order (e.g. gate)
 """
 
 import uuid
@@ -302,24 +300,25 @@ class BasePipelineManager(ABC):
             return None
 
 
-class CheckPipeline(BasePipelineManager):
+class IndependentPipeline(BasePipelineManager):
     """
-    Check pipeline: Runs verification/linting, doesn't merge.
-    Window size usually large (5+), processes many in parallel.
+    Independent pipeline: each change is tested on its own, no merge.
+    Maps to manager: independent in pipelines.yaml.
     """
     
     def on_event(self, event_data: Dict[str, Any]):
-        """Handle check pipeline events."""
-        self.logger.debug("Check pipeline event: %s", event_data)
+        """Handle independent pipeline events."""
+        self.logger.debug("Independent pipeline event: %s", event_data)
     
     def should_merge(self) -> bool:
         return False
 
 
-class GatePipeline(BasePipelineManager):
+class DependentPipeline(BasePipelineManager):
     """
-    Gate pipeline: Blocking pipeline that can trigger merges.
-    Window size usually 1 (serial processing).
+    Dependent pipeline: changes are tested speculatively on top of each other
+    and merged in order when all jobs pass.
+    Maps to manager: dependent in pipelines.yaml.
     
     Uses GateAlgorithm for:
     - Speculative merge base calculation
@@ -337,8 +336,8 @@ class GatePipeline(BasePipelineManager):
             self.gate_algorithm = None
     
     def on_event(self, event_data: Dict[str, Any]):
-        """Handle gate pipeline events."""
-        self.logger.debug("Gate pipeline event: %s", event_data)
+        """Handle dependent pipeline events."""
+        self.logger.debug("Dependent pipeline event: %s", event_data)
     
     def should_merge(self) -> bool:
         return True
@@ -439,27 +438,11 @@ class GatePipeline(BasePipelineManager):
             return False
 
 
-class ReportPipeline(BasePipelineManager):
-    """
-    Report pipeline: Post-merge reporting.
-    Runs after change is merged, doesn't block merge.
-    """
-    
-    def on_event(self, event_data: Dict[str, Any]):
-        """Handle report pipeline events."""
-        self.logger.debug("Report pipeline event: %s", event_data)
-    
-    def should_merge(self) -> bool:
-        return False
-
-
 def create_pipeline(pipeline_type: str, pipeline_id: str, redis_client: TorriRedis, gerrit_conn=None) -> BasePipelineManager:
-    """Factory to create pipeline based on type."""
-    if pipeline_type.lower() == "check":
-        return CheckPipeline(pipeline_id, redis_client)
-    elif pipeline_type.lower() == "gate":
-        return GatePipeline(pipeline_id, redis_client, gerrit_conn)
-    elif pipeline_type.lower() == "report":
-        return ReportPipeline(pipeline_id, redis_client)
+    """Factory to create pipeline based on the manager field from pipelines.yaml."""
+    if pipeline_type.lower() == "independent":
+        return IndependentPipeline(pipeline_id, redis_client)
+    elif pipeline_type.lower() == "dependent":
+        return DependentPipeline(pipeline_id, redis_client, gerrit_conn)
     else:
-        raise ValueError(f"Unknown pipeline type: {pipeline_type}")
+        raise ValueError(f"Unknown pipeline manager type: {pipeline_type}")
