@@ -148,6 +148,19 @@ class SchedulerQueue(threading.Thread):
                     self.logger.warning("Pipeline %s not found", pipeline_name)
                     continue
 
+                # Skip silently when event type is not listed in this pipeline's triggers.
+                trigger_events = [
+                    t.get("event")
+                    for t in pipeline_config.trigger.get("gerrit", [])
+                    if isinstance(t, dict)
+                ]
+                if trigger_events and event.type not in trigger_events:
+                    self.logger.debug(
+                        "Event type=%s does not match triggers %s for pipeline %s, skipping",
+                        event.type, trigger_events, pipeline_name,
+                    )
+                    continue
+
                 passed, rejection_reason = self._change_meets_requirements(event, pipeline_config)
                 if not passed:
                     reject_key = f"torri:rejected:{pipeline_name}:{change_id}:{event.patch_number}"
@@ -217,6 +230,7 @@ class SchedulerQueue(threading.Thread):
                     if _is_gate and succeeded:
                         self.logger.info("Gate pipeline succeeded for change %s — submitting to Gerrit", _cid)
                         self.gerrit_conn.submit_change(_cid)
+                    self.redis.queue_remove(f"torri:pipeline:{_pname}:queue", _cid)
                     refresh_status(self.redis, list(self.pipeline_configs.keys()))
 
                 def on_merge_done(

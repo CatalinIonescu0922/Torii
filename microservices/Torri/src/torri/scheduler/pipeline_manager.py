@@ -349,8 +349,12 @@ class DependentPipeline(BasePipelineManager):
         """
         try:
             if self.gate_algorithm and project_name and branch:
-                # Use algorithm for dependency tracking
-                position = self.gate_algorithm.enqueue_change(change_id, project_name, branch)
+                try:
+                    position = self.gate_algorithm.enqueue_change(change_id, project_name, branch)
+                except Exception as e:
+                    self.logger.error("Gate algorithm enqueue failed, falling back to basic enqueue: %s", e)
+                    queue_key = REDIS_KEYS['pipeline_queue'].format(pipeline_id=self.pipeline_id)
+                    position = self.redis.queue_enqueue(queue_key, change_id)
             else:
                 # Fall back to basic enqueue
                 queue_key = REDIS_KEYS['pipeline_queue'].format(pipeline_id=self.pipeline_id)

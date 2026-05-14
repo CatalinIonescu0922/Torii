@@ -109,6 +109,14 @@ class TorriRedis:
         except Exception as e:
             self.logger.error("Error listing queue %s: %s", queue_key, e)
             return []
+
+    def queue_remove(self, queue_key: str, item_id: str) -> None:
+        """Remove all occurrences of item_id from the queue."""
+        try:
+            self.client.lrem(queue_key, 0, item_id)
+            self.logger.debug("Removed %s from %s", item_id, queue_key)
+        except Exception as e:
+            self.logger.error("Error removing %s from %s: %s", item_id, queue_key, e)
     
     def set_state(self, state_key: str, state_data: Dict[str, Any], ttl: Optional[int] = None) -> bool:
         """Store state as JSON in Redis."""
