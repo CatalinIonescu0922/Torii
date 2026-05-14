@@ -53,14 +53,26 @@ class GerritChange:
         self.author = str(owner.get("name", ""))
         self.url = ('%s/c/%s/+/%s' % (self.base_url , self.project , self.number))
 
-        # Each label entry has a "value" field with the current aggregate vote.
-        # If nobody voted yet the field is absent; default to 0.
+        # With o=DETAILED_LABELS the per-vote values are inside the "all" list —
+        # there is no top-level "value" key in that response format.
+        # Take the highest vote from "all". Fall back to the top-level "value" key
+        # for any server that returns plain LABELS format instead.
         raw_labels = data.get("labels", {})
-        self.labels = {
-            label_name: int(label_info.get("value", 0))
-            for label_name, label_info in raw_labels.items()
-            if isinstance(label_info, dict)
-        }
+        self.labels = {}
+        for label_name, label_info in raw_labels.items():
+            if not isinstance(label_info, dict):
+                continue
+            all_votes = label_info.get("all", [])
+            if all_votes:
+                votes = [
+                    int(v["value"])
+                    for v in all_votes
+                    if isinstance(v, dict) and "value" in v
+                ]
+                self.labels[label_name] = max(votes) if votes else 0
+            else:
+                top_value = label_info.get("value")
+                self.labels[label_name] = int(top_value) if top_value is not None else 0
         
     def __repr__(self):
         return '<Change 0x%x %s %s>' % (id(self) , self.project ,self.number)
