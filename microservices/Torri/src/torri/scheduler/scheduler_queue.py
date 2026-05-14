@@ -270,6 +270,13 @@ class SchedulerQueue(threading.Thread):
         explanation suitable for posting as a Gerrit comment.
         """
         change = self.source.getChange(event.change_number, event.patch_number)
+        self.logger.debug(
+            "Requirements check change=%s pipeline=%s labels=%s status=%s patchset=%s",
+            event.change_number, pipeline_config.name,
+            change.labels if change else None,
+            change.status if change else None,
+            change.patchset if change else None,
+        )
 
         if pipeline_config.require_open:
             if change is None or change.status != "NEW":

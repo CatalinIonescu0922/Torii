@@ -27,7 +27,10 @@ class GerritSource:
         if not refresh and self.redis:
             change = self.redis.get_change(change_number, patchset)
             if change:
-                self.logger.debug("Source Redis hit change=%s patchset=%s", change_number, patchset)
+                self.logger.debug(
+                    "Source Redis hit change=%s patchset=%s labels=%s",
+                    change_number, patchset, change.labels,
+                )
                 return change
 
         if self.connection:

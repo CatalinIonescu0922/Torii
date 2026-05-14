@@ -79,15 +79,15 @@ class GerritEventProcessor(threading.Thread):
         )
 
         if event.change_number:
-            # comment-added means a vote just changed — the cached change has stale labels.
-            # Force a REST refresh so _change_meets_requirements sees the current votes.
-            force_refresh = (event.type == "comment-added")
+            # Always refresh: every Gerrit event means the change has been updated
+            # (new vote, new patchset, status change, etc.). Using the cached copy
+            # would give _change_meets_requirements a stale view of labels/status.
             self.logger.debug(
-                "Submitting change enrichment for change=%s refresh=%s",
-                event.change_number, force_refresh,
+                "Submitting change enrichment for change=%s refresh=True",
+                event.change_number,
             )
             future = self.gerrit_connection.executor.submit(
-                self.gerrit_connection.getChange, event.change_number, None, force_refresh
+                self.gerrit_connection.getChange, event.change_number, None, True
             )
             future.add_done_callback(lambda f: self._on_enrichment_done(f, event))
         else:
@@ -473,7 +473,17 @@ class GerritRestConnection(BaseConnection):
         )
 
         data, related = self.query(change_number)
+        raw_labels = data.get("labels", {})
+        self.logger.debug(
+            "REST labels raw change=%s: %s",
+            change_number,
+            {name: info.get("value") for name, info in raw_labels.items() if isinstance(info, dict)},
+        )
         change.update(data)
+        self.logger.debug(
+            "After update change=%s patchset=%s labels=%s",
+            change_number, change.patchset, change.labels,
+        )
 
         dependency_number = int(change_number)
 
