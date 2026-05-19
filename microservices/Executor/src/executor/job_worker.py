@@ -95,39 +95,39 @@ class JobWorker:
         self.log.write(f"Job directory: {self.job_dir}")
 
     def _clone_project(self) -> None:
-        # Build SSH URL for git clone
-        # Format: ssh://git@merger:22/project/path
-        merger_url = f"ssh://{self.config.merger_user}@{self.config.merger_host}:{self.config.merger_port}/{self.project}"
+        # The merger stores each repo using only the last component of the
+        # Gerrit project name (e.g. "api-gateway" from "services/api-gateway").
+        # Build an absolute SSH path that matches the merger's workspace layout.
+        repo_name = self.project.split("/")[-1]
+        repo_path = f"{self.config.merger_workspace_path}/{repo_name}"
+        merger_url = f"ssh://{self.config.merger_user}@{self.config.merger_host}:{self.config.merger_port}{repo_path}"
         src_dir = os.path.join(self.job_dir, "src")
-        self.log.write(f"Cloning {merger_url} ref={self.synthetic_ref}")
-        
-        # Set GIT_SSH_COMMAND to use the specific SSH key
+        self.log.write(f"Fetching {merger_url} ref={self.synthetic_ref}")
+
         env = os.environ.copy()
         env['GIT_SSH_COMMAND'] = f"ssh -i {self.config.merger_ssh_key} -o StrictHostKeyChecking=no"
 
+        # Init an empty repo and fetch only the exact synthetic ref the merger
+        # prepared. This avoids downloading the default branch first and then
+        # fetching on top — one round-trip, one commit.
+        subprocess.run(["git", "init", src_dir], capture_output=True, check=True)
+
         result = subprocess.run(
-            ["git", "clone", "--depth=1", merger_url, src_dir],
+            ["git", "-C", src_dir, "fetch", "--depth=1", merger_url, self.synthetic_ref],
             capture_output=True,
             text=True,
             env=env,
         )
         if result.returncode != 0:
-            raise RuntimeError(f"git clone failed: {result.stderr.strip()}")
+            raise RuntimeError(f"git fetch failed: {result.stderr.strip()}")
 
-        # Fetch and checkout the specific synthetic ref.
-        subprocess.run(
-            ["git", "-C", src_dir, "fetch", "origin", self.synthetic_ref],
-            capture_output=True,
-            check=True,
-            env=env,
-        )
         subprocess.run(
             ["git", "-C", src_dir, "checkout", "FETCH_HEAD"],
             capture_output=True,
             check=True,
             env=env,
         )
-        self.log.write("Clone complete")
+        self.log.write("Fetch complete")
 
     def _make_runner(self) -> BaseRunner:
         nodes = self.nodeset_config.get("nodes", [])

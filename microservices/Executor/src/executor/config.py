@@ -98,3 +98,8 @@ class ExecutorConfig:
     def merger_ssh_key(self) -> str:
         """Path to SSH private key for merger authentication."""
         return self._get("merger", "ssh_key", "/root/.ssh/Torri_ed25519")
+
+    @property
+    def merger_workspace_path(self) -> str:
+        """Absolute path on the merger where repos are cached."""
+        return self._get("merger", "workspace_path", "/tmp/torri_merger_workspaces/cache")
