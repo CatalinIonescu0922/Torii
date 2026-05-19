@@ -48,7 +48,6 @@ class JobWorker:
         self.project = payload["project"]
         self.branch = payload["branch"]
         self.synthetic_ref = payload["synthetic_ref"]
-        self.merger_base_url = payload["merger_base_url"].rstrip("/")
         self.job_config = payload.get("job_config", {})
         self.nodeset_config = payload.get("nodeset_config", {})
 
@@ -96,14 +95,21 @@ class JobWorker:
         self.log.write(f"Job directory: {self.job_dir}")
 
     def _clone_project(self) -> None:
-        repo_url = f"{self.merger_base_url}/{self.project}"
+        # Build SSH URL for git clone
+        # Format: ssh://git@merger:22/project/path
+        merger_url = f"ssh://{self.config.merger_user}@{self.config.merger_host}:{self.config.merger_port}/{self.project}"
         src_dir = os.path.join(self.job_dir, "src")
-        self.log.write(f"Cloning {repo_url} ref={self.synthetic_ref}")
+        self.log.write(f"Cloning {merger_url} ref={self.synthetic_ref}")
+        
+        # Set GIT_SSH_COMMAND to use the specific SSH key
+        env = os.environ.copy()
+        env['GIT_SSH_COMMAND'] = f"ssh -i {self.config.merger_ssh_key} -o StrictHostKeyChecking=no"
 
         result = subprocess.run(
-            ["git", "clone", "--depth=1", repo_url, src_dir],
+            ["git", "clone", "--depth=1", merger_url, src_dir],
             capture_output=True,
             text=True,
+            env=env,
         )
         if result.returncode != 0:
             raise RuntimeError(f"git clone failed: {result.stderr.strip()}")
@@ -113,11 +119,13 @@ class JobWorker:
             ["git", "-C", src_dir, "fetch", "origin", self.synthetic_ref],
             capture_output=True,
             check=True,
+            env=env,
         )
         subprocess.run(
             ["git", "-C", src_dir, "checkout", "FETCH_HEAD"],
             capture_output=True,
             check=True,
+            env=env,
         )
         self.log.write("Clone complete")
 

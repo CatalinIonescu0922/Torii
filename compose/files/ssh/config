@@ -4,3 +4,10 @@ Host gerrit
   Port 29418
   StrictHostKeyChecking no
   IdentityFile /root/.ssh/Torri_ed25519
+  
+Host merger
+  HostName merger
+  User git 
+  Port 22
+  StrictHostKeyChecking no
+  IdentityFile /root/.ssh/Torri_ed25519

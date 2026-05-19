@@ -17,10 +17,6 @@ services:
         condition: service_healthy
       kafka-config:
         condition: service_completed_successfully
-    environment:
-      KAFKA_SERVER: kafka:9092
-      REDIS_URL: redis://redis:6379/0
-      LOG_DIR: /app
     expose:
       - "8000"
     ports:
@@ -34,7 +30,7 @@ services:
       target: merger
     container_name: merger_service
     volumes:
-      - ./logs/merger/:/tmp/ephemeral/logs/
+      - ./logs/merger:/app/ephemeral/logs
     networks:
       - torii
     depends_on:
@@ -44,9 +40,24 @@ services:
         condition: service_healthy
       kafka-config:
         condition: service_completed_successfully
-    environment:
-      KAFKA_SERVER: kafka:9092
-      REDIS_URL: redis://redis:6379/0
 
+  executor:
+    pull_policy: build
+    build:
+      context: ../
+      dockerfile: compose/Dockerfile
+      target: executor
+    container_name: executor_service
+    volumes:
+      - ./logs/executor:/app/ephemeral/logs
+    networks:
+      - torii
+    depends_on:
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-config:
+        condition: service_completed_successfully
 
 

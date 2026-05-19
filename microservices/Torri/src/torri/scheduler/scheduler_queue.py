@@ -31,7 +31,7 @@ class SchedulerQueue(threading.Thread):
         source,
         yaml_dir: str,
         redis_url: Optional[str] = None,
-        kafka_bootstrap: str = "kafka:9094",
+        kafka_bootstrap: str = "kafka:9092",
         merger_base_url: str = "http://merger:8080",
     ):
         super().__init__(daemon=True, name="SchedulerQueue")

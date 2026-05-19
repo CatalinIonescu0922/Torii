@@ -68,7 +68,7 @@ def _merge_worker(
     patchset_refs: list[str],
     on_done: Callable[[Optional[str], Optional[str]], None],
 ) -> None:
-    kafka_server = os.getenv("KAFKA_SERVER", "localhost:9094")
+    kafka_server = os.getenv("KAFKA_SERVER", "kafka:9092")
 
     producer = KafkaProducerClient(kafka_server)
     consumer = Consumer({

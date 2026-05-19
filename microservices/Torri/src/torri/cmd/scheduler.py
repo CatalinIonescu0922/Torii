@@ -55,14 +55,13 @@ def main():
     cli = TorriCLI("Torii Scheduler")
     args = cli.parse_args()
 
-    # Setup logging using the config file next to torii.conf
-    # __file__ = .../torri/cmd/scheduler.py  → parents[1] = .../torri/
-    torri_root = Path(__file__).resolve().parents[1]
-    log_config = torri_root / "config" / "log" / "main_logging.yaml"
-    # LOG_DIR lets compose override where rotating log files land (e.g. /app/logs).
-    # ephemeral/logs/server-debug.log is resolved relative to it.
-    log_dir = Path(os.getenv("LOG_DIR", str(torri_root)))
-    setup_logging(log_config, log_dir)
+    # Setup logging using shared config from /app/config/log/
+    log_config = Path("/app/config/log/main_logging.yaml")
+    
+    # Resolve log paths relative to scheduler workspace (container /app)
+    # This allows ephemeral/logs/server-debug.log to resolve correctly
+    workspace_root = Path(os.getenv("SCHEDULER_WORKSPACE_PATH", "/app"))
+    setup_logging(log_config, workspace_root)
 
     logger = get_logger("torri.scheduler.main")
     logger.info("Starting Torii Scheduler")
@@ -103,8 +102,8 @@ def main():
     # gerrit-stream-events: raw Gerrit events → GerritEventProcessor enriches and
     # publishes to trigger-events.
     kafka_conn = KafkaConnection(
-        topic=os.getenv("KAFKA_INPUT_TOPIC", "gerrit-stream-events"),
-        group_id="gerrit-stream-consumer-group",
+        topic=config.kafka_topic_gerrit_stream,
+        group_id=config.kafka_group_gerrit_stream,
     )
     kafka_conn.connect()
     event_processor = GerritEventProcessor(kafka_conn, gerrit_conn)
@@ -112,8 +111,8 @@ def main():
 
     # trigger-events: enriched events ready for the scheduler.
     trigger_conn = KafkaConnection(
-        topic=os.getenv("KAFKA_TRIGGER_TOPIC", "trigger-events"),
-        group_id="trigger-consumer-group",
+        topic=config.kafka_topic_trigger_events,
+        group_id=config.kafka_group_trigger,
     )
     trigger_conn.connect()
 

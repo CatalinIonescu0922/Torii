@@ -20,7 +20,7 @@ class KafkaConnection(threading.Thread):
         self.event_queue = Queue(0)
         # Consumer configuration
         self.consumer_config = {
-            'bootstrap.servers': os.getenv("KAFKA_SERVER", "localhost:9094"),
+            'bootstrap.servers': os.getenv("KAFKA_SERVER", "kafka:9092"),
             'group.id': group_id or os.getenv("KAFKA_GROUPID", "events-consumer-group"),
             'auto.offset.reset': 'earliest',
             'enable.auto.commit': False,  # Manual commit for reliability

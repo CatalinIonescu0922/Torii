@@ -43,7 +43,7 @@ def main() -> int:
     logger = get_logger("torri.integration")
 
     # Read connection settings from environment
-    kafka_server = os.getenv("KAFKA_SERVER", "localhost:9094")
+    kafka_server = os.getenv("KAFKA_SERVER", "kafka:9092")
     kafka_topic = os.getenv("KAFKA_INPUT_TOPIC", "gerrit-stream-events")
     kafka_group_id = os.getenv("KAFKA_GROUPID", "torri-integration")
 

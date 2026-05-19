@@ -1,0 +1,9 @@
+---
+# Post-run cleanup
+
+- hosts: all
+  gather_facts: no
+  tasks:
+    - name: Integration tests completed
+      debug:
+        msg: "Integration tests completed"

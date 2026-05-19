@@ -1,0 +1,31 @@
+---
+# Test that installed package works and logs are captured over time
+
+- hosts: all
+  gather_facts: no
+  tasks:
+    - name: Run test script with 25-second loop
+      shell: |
+        python3 << 'EOF'
+        import time
+        print("===== TEST START =====")
+        print(f"Starting 25-second test loop")
+        
+        for second in range(1, 26):
+            elapsed = second
+            print(f"[{elapsed:2d}s] Unit test checkpoint - requests library working - iteration {second}")
+            time.sleep(1)
+        
+        print("===== TEST PASS =====")
+        EOF
+      register: test_output
+      changed_when: False
+
+    - name: Log test output
+      debug:
+        msg: "{{ test_output.stdout }}"
+
+    - name: Verify test passed
+      fail:
+        msg: "Test failed"
+      when: "'TEST PASS' not in test_output.stdout"

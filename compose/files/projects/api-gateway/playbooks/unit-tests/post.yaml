@@ -1,0 +1,9 @@
+---
+# Post-run cleanup
+
+- hosts: all
+  gather_facts: no
+  tasks:
+    - name: Test execution completed
+      debug:
+        msg: "Unit tests completed successfully"

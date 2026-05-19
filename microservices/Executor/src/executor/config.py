@@ -33,7 +33,7 @@ class ExecutorConfig:
     # Kafka
     @property
     def kafka_bootstrap(self) -> str:
-        return self._get("kafka", "bootstrap_servers", "kafka:9094")
+        return self._get("kafka", "bootstrap_servers", "kafka:9092")
 
     @property
     def kafka_group_id(self) -> str:
@@ -77,3 +77,24 @@ class ExecutorConfig:
             return self._config.get("images", label)
         except (configparser.NoSectionError, configparser.NoOptionError):
             return ""
+    
+    # Merger SSH Git server
+    @property
+    def merger_host(self) -> str:
+        """Merger SSH Git server hostname."""
+        return self._get("merger", "host", "merger")
+    
+    @property
+    def merger_port(self) -> int:
+        """Merger SSH Git server port."""
+        return self._get_int("merger", "port", 22)
+    
+    @property
+    def merger_user(self) -> str:
+        """Merger SSH user (typically 'git')."""
+        return self._get("merger", "user", "git")
+    
+    @property
+    def merger_ssh_key(self) -> str:
+        """Path to SSH private key for merger authentication."""
+        return self._get("merger", "ssh_key", "/root/.ssh/Torri_ed25519")

@@ -186,7 +186,7 @@ class ConfigurationManager:
     @property
     def kafka_bootstrap_servers(self) -> str:
         """Kafka bootstrap servers (comma-separated)."""
-        return self._get_value('connection kafka', 'bootstrap_servers', 'localhost:9092')
+        return self._get_value('connection kafka', 'bootstrap_servers', 'kafka:9092')
     
     @property
     def kafka_bootstrap_servers_list(self) -> list:
@@ -217,6 +217,26 @@ class ConfigurationManager:
     def kafka_topic_gerrit_events(self) -> str:
         """Kafka topic for Gerrit events."""
         return self._get_value('connection kafka', 'topic_gerrit_events', 'gerrit-events')
+    
+    @property
+    def kafka_topic_gerrit_stream(self) -> str:
+        """Kafka topic for raw Gerrit stream events."""
+        return self._get_value('connection kafka', 'topic_gerrit_stream', 'gerrit-stream-events')
+    
+    @property
+    def kafka_topic_trigger_events(self) -> str:
+        """Kafka topic for enriched trigger events."""
+        return self._get_value('connection kafka', 'topic_trigger_events', 'trigger-events')
+    
+    @property
+    def kafka_group_gerrit_stream(self) -> str:
+        """Kafka consumer group for gerrit stream."""
+        return self._get_value('connection kafka', 'group_gerrit_stream', 'gerrit-stream-consumer-group')
+    
+    @property
+    def kafka_group_trigger(self) -> str:
+        """Kafka consumer group for trigger events."""
+        return self._get_value('connection kafka', 'group_trigger', 'trigger-consumer-group')
     
     @property
     def kafka_compression_type(self) -> str:

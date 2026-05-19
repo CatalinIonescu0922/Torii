@@ -1,0 +1,18 @@
+---
+# Install a test dependency for integration tests
+
+- hosts: all
+  gather_facts: no
+  tasks:
+    - name: Install urllib3 package
+      shell: python3 -m pip install --quiet urllib3
+      changed_when: False
+
+    - name: Verify urllib3 installed
+      shell: python3 -c "import urllib3; print(f'urllib3 version: {urllib3.__version__}')"
+      register: urllib3_version
+      changed_when: False
+
+    - name: Log package info
+      debug:
+        msg: "{{ urllib3_version.stdout }}"

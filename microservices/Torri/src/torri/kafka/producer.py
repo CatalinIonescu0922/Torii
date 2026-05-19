@@ -11,7 +11,7 @@ class KafkaProducerClient:
     """
     def __init__(self, bootstrap_servers: Optional[str] = None):
         self.logger = get_logger("torri.kafka.producer")
-        servers = bootstrap_servers or os.getenv("KAFKA_SERVER", "localhost:9094")
+        servers = bootstrap_servers or os.getenv("KAFKA_SERVER", "kafka:9092")
         
         self.producer_config = {
             'bootstrap.servers': servers,

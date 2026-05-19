@@ -4,14 +4,14 @@ import os
 from pathlib import Path
 
 def run_server(args):
-    # We load the setup_logging immediately before loading internal architecture
-    # Providing the required dummy paths since we are passing them explicitly now
-    base_dir = Path(__file__).resolve().parent.parent
-    config_yaml = base_dir / "config" / "log" / "main_logging.yaml"
+    # Use shared logging configuration from /app/config/log/
+    config_yaml = Path("/app/config/log/main_logging.yaml")
     
+    # Resolve log paths relative to merger workspace (container /app)
+    service_root = Path(os.getenv("MERGER_WORKSPACE_PATH", "/app"))
     setup_logging(
         config_path=str(config_yaml), 
-        service_root=Path(os.getenv("MERGER_WORKSPACE_PATH", "/tmp/"))
+        service_root=service_root
     )
     
     from torri.merger.server import KafkaConsumerWorker

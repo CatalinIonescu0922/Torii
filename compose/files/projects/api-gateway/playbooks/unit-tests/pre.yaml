@@ -1,0 +1,18 @@
+---
+# Install a test dependency to verify pip works and logs are captured
+
+- hosts: all
+  gather_facts: no
+  tasks:
+    - name: Install requests package
+      shell: python3 -m pip install --quiet requests
+      changed_when: False
+
+    - name: Verify package installed
+      shell: python3 -c "import requests; print(f'requests version: {requests.__version__}')"
+      register: pkg_version
+      changed_when: False
+
+    - name: Log package detection
+      debug:
+        msg: "{{ pkg_version.stdout }}"

@@ -3,7 +3,9 @@ jobs:
       name: unit-tests
       nodeset: single-python
       timeout: 600
+      pre-run: playbooks/unit-tests/pre.yaml
       run: playbooks/unit-tests/run.yaml
+      post-run: playbooks/unit-tests/post.yaml
 
   - job:
       name: integration-tests

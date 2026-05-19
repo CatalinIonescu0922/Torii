@@ -16,10 +16,12 @@ WORKDIR /build
 
 COPY microservices/Shared/ /build/Shared/
 COPY microservices/Torri/ /build/Torri/
+COPY microservices/Executor/ /build/Executor/
 
 # Install the packages into the virtualenv using uv
 RUN uv pip install --no-cache ./Shared && \
-    uv pip install --no-cache ./Torri
+    uv pip install --no-cache ./Torri && \
+    uv pip install --no-cache ./Executor
 
 # ==========================================
 # Stage 2: Runtime Base Layer
@@ -40,15 +42,12 @@ ENV PATH="/opt/venv/bin:$PATH"
 WORKDIR /app
 COPY --link microservices/Shared/ /app/Shared/
 COPY --link microservices/Torri/ /app/Torri/
+COPY --link microservices/Executor/ /app/Executor/
 
-ENV PYTHONPATH="/app/Shared/src:/app/Torri/src"
+# Copy shared logging configuration to a central location
+COPY --link microservices/Torri/src/torri/config/log/ /app/config/log/
 
-# THE TRICK: 
-# Create a user named 'git' with UID 0 (root alias) using the '-o' flag.
-# We set its shell to '/usr/bin/git-shell' so even though it has root privileges, 
-# it can ONLY execute git commands over SSH (clone/fetch), securing the container.
-RUN useradd -o -u 0 -g 0 -m -d /home/git -s /usr/bin/git-shell git && \
-    mkdir -p /home/git/.ssh /tmp/torri_workspaces
+ENV PYTHONPATH="/app/Shared/src:/app/Torri/src:/app/Executor/src"
 
 # Set Supervisor as the primary entrypoint for the base runtime
 CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"]
@@ -62,6 +61,8 @@ FROM runtime-base AS merger
 COPY --link compose/files/ssh/ /home/git/.ssh/
 COPY --link compose/files/supervisor/merger/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
+RUN useradd -o -u 0 -g 0 -m -d /home/git -s /usr/bin/git-shell git && \
+    mkdir -p /home/git/.ssh /tmp/torri_workspaces
 # Symlink for SSH config compatibility: /root/.ssh -> /home/git/.ssh
 RUN chmod 700 /home/git/.ssh && chmod 600 /home/git/.ssh/Torri_ed25519
 RUN rm -rf /root/.ssh && ln -s /home/git/.ssh /root/.ssh
@@ -87,3 +88,25 @@ COPY compose/files/supervisor/scheduler/status_api.conf /etc/supervisor/conf.d/s
 COPY compose/files/torri/ /app/Torri/src/torri/config/layout/
 
 RUN mkdir -p /app/logs
+
+# ==========================================
+# Stage 5: Executor Service (Target: executor)
+# ==========================================
+FROM runtime-base AS executor
+
+# Copy the custom supervisord configuration for the Executor
+COPY --link compose/files/supervisor/executor/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+# Copy executor configuration
+COPY --link microservices/Executor/src/executor/executor.conf /app/Executor/src/executor/executor.conf
+
+# Copy SSH key for merger authentication
+COPY --link compose/files/ssh/Torri_ed25519 /root/.ssh/Torri_ed25519
+COPY --link compose/files/ssh/config /root/.ssh/config
+
+RUN chmod 700 /root/.ssh && chmod 600 /root/.ssh/Torri_ed25519
+
+# Create executor working directories
+RUN mkdir -p /var/torii/jobs /etc/torri /app/logs
+
+

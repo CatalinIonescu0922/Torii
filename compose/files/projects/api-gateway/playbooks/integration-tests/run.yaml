@@ -1,0 +1,35 @@
+---
+# Integration test with 25-second loop
+
+- hosts: all
+  gather_facts: no
+  tasks:
+    - name: Run integration test with timed loop
+      shell: |
+        python3 << 'EOF'
+        import time
+        import urllib3
+        
+        print("===== INTEGRATION START =====")
+        print(f"urllib3 version: {urllib3.__version__}")
+        print(f"Starting 25-second integration loop")
+        
+        for second in range(1, 26):
+            http = urllib3.PoolManager()
+            status = "OK" if http else "FAIL"
+            print(f"[{second:2d}s] Integration pool #{second} - status: {status} - connection pooling operational")
+            time.sleep(1)
+        
+        print("===== INTEGRATION PASS =====")
+        EOF
+      register: integration_output
+      changed_when: False
+
+    - name: Log integration results
+      debug:
+        msg: "{{ integration_output.stdout }}"
+
+    - name: Verify integration passed
+      fail:
+        msg: "Integration test failed"
+      when: "'INTEGRATION PASS' not in integration_output.stdout"

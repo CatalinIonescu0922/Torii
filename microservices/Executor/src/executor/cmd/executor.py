@@ -7,24 +7,26 @@ A semaphore limits how many jobs run concurrently (max_workers from config).
 
 import json
 import logging
+import os
 import signal
 import threading
+from pathlib import Path
 
 from confluent_kafka import Consumer, KafkaError
 
-from executor.config import ExecutorConfig
-from executor.job_worker import JobWorker
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(name)s %(levelname)s %(message)s",
-)
 logger = logging.getLogger("executor.main")
 
 
-def main():
+def run_executor(args):
+    """Main executor worker loop.
+    
+    Reads job-requests from Kafka and spawns JobWorker threads.
+    """
+    from executor.config import ExecutorConfig
+    from executor.job_worker import JobWorker
+    
     config = ExecutorConfig()
-
+    
     semaphore = threading.Semaphore(config.max_workers)
     stop_event = threading.Event()
 
@@ -77,3 +79,40 @@ def main():
     finally:
         consumer.close()
         logger.info("Executor stopped")
+
+
+def main():
+    """CLI entry point for torri-executor."""
+    from shared.logger_setup import setup_logging
+    
+    # Import TorriCLI from torri.cmd if available, otherwise use basic argparse
+    try:
+        from torri.cmd import TorriCLI
+    except ImportError:
+        # Fallback: create a minimal CLI
+        import argparse
+        class MinimalCLI:
+            def __init__(self, description="Torri Executor"):
+                self.parser = argparse.ArgumentParser(description=description)
+                self.parser.add_argument('-d', '--nodaemon', action='store_true', help='Do not daemonize.')
+                self.parser.add_argument('-c', '--config', help='Path to configuration file')
+            def parse_args(self):
+                return self.parser.parse_args()
+            def run(self, main_func):
+                args = self.parse_args()
+                main_func(args)
+        TorriCLI = MinimalCLI
+    
+    # Use shared logging config from /app/config/log/
+    log_config = Path("/app/config/log/main_logging.yaml")
+    
+    # Resolve log paths relative to executor workspace (container /app)
+    workspace_root = Path(os.getenv("EXECUTOR_WORKSPACE_PATH", "/app"))
+    setup_logging(log_config, workspace_root)
+    
+    cli = TorriCLI(description="Torri Executor")
+    cli.run(run_executor)
+
+
+if __name__ == "__main__":
+    main()

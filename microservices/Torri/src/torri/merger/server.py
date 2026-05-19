@@ -20,7 +20,7 @@ class KafkaConsumerWorker:
         self.logger = get_logger("torri.merger.server")
         
         # Init internal Kafka Producer to send responses out
-        self.producer = KafkaProducerClient(os.getenv("KAFKA_SERVER", "localhost:9094"))
+        self.producer = KafkaProducerClient(os.getenv("KAFKA_SERVER", "kafka:9092"))
         self.input_topic = os.getenv("KAFKA_MERGER_INPUT_TOPIC", "merger-requests")
         self.output_topic = os.getenv("KAFKA_MERGER_OUTPUT_TOPIC", "merger-responses")
         self.dlq_topic = os.getenv("KAFKA_MERGER_DLQ_TOPIC", "merger-dlq")
@@ -34,7 +34,7 @@ class KafkaConsumerWorker:
         self.cache_orchestrator = Merger(self.cache_root)
         
         self.consumer_config = {
-            'bootstrap.servers': os.getenv("KAFKA_SERVER", "localhost:9094"),
+            'bootstrap.servers': os.getenv("KAFKA_SERVER", "kafka:9092"),
             'group.id': os.getenv("KAFKA_MERGER_GROUPID", "merger-workers-group"),
             'auto.offset.reset': 'earliest',
             'enable.auto.commit': False,  # Requires manual commit for At-Least-Once resiliency
