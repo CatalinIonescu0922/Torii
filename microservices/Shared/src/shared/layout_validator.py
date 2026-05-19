@@ -70,15 +70,43 @@ class Validator:
         return projects_file_schema
 
     @classmethod
-    def createJobsSchema(cls):
+    def createJobsSchema(cls, nodeset_names: set = None):
+        nodeset_validator = (
+            V.In(nodeset_names, msg="nodeset not defined in nodesets.yaml")
+            if nodeset_names
+            else str
+        )
+        job_detail_schema = {
+            V.Required('name'): str,
+            V.Required('nodeset'): nodeset_validator,
+            V.Optional('timeout'): int,
+            V.Optional('pre-run'): V.Any(str, [str]),
+            V.Required('run'): V.Any(str, [str]),
+            V.Optional('post-run'): V.Any(str, [str]),
+        }
         jobs_file_schema = V.Schema({
-            V.Required('jobs') : [
-                {V.Required('job') : {
-                    V.Required('name') : str
-                }}
+            V.Required('jobs'): [
+                {V.Required('job'): job_detail_schema}
             ]
         })
         return jobs_file_schema
+
+    @classmethod
+    def createNodesetsSchema(cls):
+        node_schema = {
+            V.Required('name'): str,
+            V.Required('label'): str,
+        }
+        nodeset_detail_schema = {
+            V.Required('name'): str,
+            V.Required('nodes'): [node_schema],
+        }
+        nodesets_file_schema = V.Schema({
+            V.Required('nodesets'): [
+                {V.Required('nodeset'): nodeset_detail_schema}
+            ]
+        })
+        return nodesets_file_schema
 
     @classmethod
     def createPipelinesSchema(cls) -> V.Schema:
@@ -127,44 +155,54 @@ class Validator:
         })
         return pipeline_file_schema
     @classmethod
-    def validate(cls,data : dict, file_name : str, list_of_pipelines:list=None , list_of_jobs:list=None) -> dict:
-        # takes only the word before the . of the file_name
+    def validate(cls, data: dict, file_name: str, list_of_pipelines: list = None, list_of_jobs: list = None, list_of_nodesets: set = None) -> dict:
         resurce_name = os.path.splitext(file_name)[0]
         resurces = data.get(resurce_name)
         try:
             names = Validator.checkDuplicate(resurces)
             match resurce_name:
                 case 'projects':
-                    schema = Validator.createProjectSchema(list_of_pipelines , list_of_jobs)
+                    schema = Validator.createProjectSchema(list_of_pipelines, list_of_jobs)
                 case 'jobs':
-                    schema = Validator.createJobsSchema()
+                    schema = Validator.createJobsSchema(nodeset_names=list_of_nodesets)
                 case 'pipelines':
                     schema = Validator.createPipelinesSchema()
+                case 'nodesets':
+                    schema = Validator.createNodesetsSchema()
             schema(data)
-            return data , names
-        except V.Invalid as E :
+            return data, names
+        except V.Invalid as E:
             raise V.Invalid(f"{E} in {file_name} file ")
     @classmethod
-    def validateAllFiles(cls) :
-        # the order of the files is like this jobs pipelines then projects 
+    def validateAllFiles(cls):
+        # validation order: nodesets → jobs → pipelines → projects
         try:
+            nodesets_data = Validator.getYamlData('nodesets.yaml')
+            nodesets_data, nodeset_names = Validator.validate(nodesets_data, 'nodesets.yaml')
+
             jobs_data = Validator.getYamlData('jobs.yaml')
-            jobs_data , job_names = Validator.validate(jobs_data,'jobs.yaml')
+            jobs_data, job_names = Validator.validate(jobs_data, 'jobs.yaml', list_of_nodesets=nodeset_names)
 
             pipelines_data = Validator.getYamlData('pipelines.yaml')
-            pipelines_data , pipeline_names = Validator.validate(pipelines_data,'pipelines.yaml')
+            pipelines_data, pipeline_names = Validator.validate(pipelines_data, 'pipelines.yaml')
 
             projects_data = Validator.getYamlData('projects.yaml')
-            projects_data, project_names = Validator.validate(projects_data,'projects.yaml',list_of_pipelines=pipeline_names ,list_of_jobs=job_names)
+            projects_data, project_names = Validator.validate(
+                projects_data, 'projects.yaml',
+                list_of_pipelines=pipeline_names,
+                list_of_jobs=job_names,
+            )
 
             return {
-                "jobs_data" : jobs_data,
-                "job_names" : job_names,
-                "pipelines_data" : pipelines_data,
-                "pipeline_names" : pipeline_names,
-                "projects_data" : projects_data,
-                "projects_names" : project_names
+                "nodesets_data": nodesets_data,
+                "nodeset_names": nodeset_names,
+                "jobs_data": jobs_data,
+                "job_names": job_names,
+                "pipelines_data": pipelines_data,
+                "pipeline_names": pipeline_names,
+                "projects_data": projects_data,
+                "projects_names": project_names,
             }
-            
+
         except Exception:
-            raise 
+            raise

@@ -30,6 +30,7 @@ def launch_jobs(
     redis: TorriRedis,
     on_done: Callable[[bool], None],
     synthetic_ref: str = None,
+    patchset: str = None,
 ):
     """
     Spawn one mock thread per job.
@@ -59,22 +60,22 @@ def launch_jobs(
 
     for job_name in job_names:
         job_id = f"{pipeline_name}:{change_id}:{job_name}:{uuid.uuid4().hex[:6]}"
-        _write_job(redis, job_id, change_id, pipeline_name, job_name, "running", None, synthetic_ref)
+        _write_job(redis, job_id, change_id, pipeline_name, job_name, "running", None, synthetic_ref, patchset)
         logger.info("Job started job_id=%s change=%s pipeline=%s ref=%s", job_id, change_id, pipeline_name, synthetic_ref)
 
         t = threading.Thread(
             target=_run_job,
-            args=(job_id, change_id, pipeline_name, job_name, redis, remaining, lock, on_done),
+            args=(job_id, change_id, pipeline_name, job_name, redis, remaining, lock, on_done, patchset),
             daemon=True,
             name=f"job-{job_id}",
         )
         t.start()
 
 
-def _run_job(job_id, change_id, pipeline_name, job_name, redis, remaining, lock, on_done):
+def _run_job(job_id, change_id, pipeline_name, job_name, redis, remaining, lock, on_done, patchset=None):
     time.sleep(JOB_DURATION_SECONDS)
     end_time = datetime.now(timezone.utc).isoformat()
-    _write_job(redis, job_id, change_id, pipeline_name, job_name, "success", end_time)
+    _write_job(redis, job_id, change_id, pipeline_name, job_name, "success", end_time, patchset=patchset)
     logger.info("Job finished job_id=%s change=%s pipeline=%s", job_id, change_id, pipeline_name)
 
     with lock:
@@ -86,8 +87,8 @@ def _run_job(job_id, change_id, pipeline_name, job_name, redis, remaining, lock,
         on_done(succeeded)
 
 
-def _write_job(redis, job_id, change_id, pipeline_name, job_name, status, end_time, synthetic_ref=None):
-    key = f"torri:job:{pipeline_name}:{change_id}:{job_name}"
+def _write_job(redis, job_id, change_id, pipeline_name, job_name, status, end_time, synthetic_ref=None, patchset=None):
+    key = f"torri:job:{pipeline_name}:{change_id}:{patchset}:{job_name}" if patchset else f"torri:job:{pipeline_name}:{change_id}:{job_name}"
     now = datetime.now(timezone.utc).isoformat()
     redis.set_state(key, {
         "job_id": job_id,

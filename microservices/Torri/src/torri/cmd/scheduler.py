@@ -15,14 +15,18 @@ from torri.gerrit.gerritconnection import GerritEventProcessor, GerritRestConnec
 from torri.gerrit.gerritsource import GerritSource
 from torri.scheduler.redis_client import TorriRedis
 from torri.scheduler.scheduler_queue import SchedulerQueue
+from torri.scheduler.result_consumer import ResultConsumer
 
 
 def _validate_yaml_files(yaml_dir: str, logger):
-    """Validate all three YAML files before starting. Raises on bad config."""
+    """Validate all YAML files before starting. Raises on bad config."""
     logger.info("Validating YAML configuration files in %s", yaml_dir)
 
+    nodesets_data = _load_yaml(yaml_dir, "nodesets.yaml")
+    nodesets_data, nodeset_names = Validator.validate(nodesets_data, "nodesets.yaml")
+
     jobs_data = _load_yaml(yaml_dir, "jobs.yaml")
-    jobs_data, job_names = Validator.validate(jobs_data, "jobs.yaml")
+    jobs_data, job_names = Validator.validate(jobs_data, "jobs.yaml", list_of_nodesets=nodeset_names)
 
     pipelines_data = _load_yaml(yaml_dir, "pipelines.yaml")
     pipelines_data, pipeline_names = Validator.validate(pipelines_data, "pipelines.yaml")
@@ -84,7 +88,17 @@ def main():
     )
     source = GerritSource(connection=gerrit_conn, redis=gerrit_conn.redis)
 
-    scheduler_queue = SchedulerQueue(gerrit_conn, source, yaml_dir=yaml_dir, redis_url=config.redis_url)
+    kafka_bootstrap = config.kafka_bootstrap_servers
+    merger_base_url = config.merger_base_url
+
+    scheduler_queue = SchedulerQueue(
+        gerrit_conn,
+        source,
+        yaml_dir=yaml_dir,
+        redis_url=config.redis_url,
+        kafka_bootstrap=kafka_bootstrap,
+        merger_base_url=merger_base_url,
+    )
 
     # gerrit-stream-events: raw Gerrit events → GerritEventProcessor enriches and
     # publishes to trigger-events.
@@ -126,6 +140,14 @@ def main():
 
     bridge_thread = threading.Thread(target=_trigger_bridge, name="TriggerBridge", daemon=True)
     bridge_thread.start()
+
+    # Start the result consumer after the scheduler is running so pipeline_configs are loaded.
+    result_consumer = ResultConsumer(
+        kafka_bootstrap=kafka_bootstrap,
+        redis=TorriRedis(config.redis_url),
+        pipeline_names=list(scheduler_queue.pipeline_configs.keys()),
+    )
+    result_consumer.start()
 
     logger.info("Scheduler running. Waiting for events...")
 

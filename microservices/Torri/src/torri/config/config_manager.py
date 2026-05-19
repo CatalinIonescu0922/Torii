@@ -236,6 +236,11 @@ class ConfigurationManager:
     def merger_git_dir(self) -> str:
         """Git working directory for merger."""
         return self._get_value('merger', 'git_dir', '/tmp/torri/merger-git')
+
+    @property
+    def merger_base_url(self) -> str:
+        """HTTP base URL of the merger git server (used by executor to clone speculative refs)."""
+        return self._get_value('merger', 'base_url', 'http://merger:8080')
     
     @property
     def merger_git_user_email(self) -> str:

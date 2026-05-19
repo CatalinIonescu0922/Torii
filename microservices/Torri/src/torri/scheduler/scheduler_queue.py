@@ -17,15 +17,23 @@ from torri.scheduler.pipeline_manager import (
     BasePipelineManager, IndependentPipeline, DependentPipeline,
     ChangeInfoModel, ChangeState
 )
-from torri.scheduler.job_runner import launch_jobs
 from torri.scheduler.status_writer import refresh_status
 from torri.scheduler.merger_client import request_merge
+from torri.scheduler import executor_dispatcher
 
 
 class SchedulerQueue(threading.Thread):
     """Main scheduler thread that processes events and routes to pipelines."""
 
-    def __init__(self, gerrit_conn, source, yaml_dir: str, redis_url: Optional[str] = None):
+    def __init__(
+        self,
+        gerrit_conn,
+        source,
+        yaml_dir: str,
+        redis_url: Optional[str] = None,
+        kafka_bootstrap: str = "kafka:9094",
+        merger_base_url: str = "http://merger:8080",
+    ):
         super().__init__(daemon=True, name="SchedulerQueue")
         self.logger = get_logger("torri.scheduler.queue")
 
@@ -33,15 +41,19 @@ class SchedulerQueue(threading.Thread):
         self.source = source
         self.yaml_dir = yaml_dir
         self.redis = TorriRedis(redis_url)
+        self.kafka_bootstrap = kafka_bootstrap
+        self.merger_base_url = merger_base_url
 
         self.event_queue: queue.Queue = queue.Queue()
         self.running = False
         self.pipelines: Dict[str, BasePipelineManager] = {}
         self.pipeline_configs: Dict[str, PipelineConfig] = {}
-        # project_name -> list of pipeline names the project participates in
         self.project_pipelines: Dict[str, List[str]] = {}
-        # (project_name, pipeline_name) -> list of job names
         self.project_pipeline_jobs: Dict[tuple, List[str]] = {}
+        # job_name → job config dict (nodeset, timeout, run, pre-run, post-run)
+        self.job_configs: Dict[str, dict] = {}
+        # nodeset_name → nodeset config dict (name, nodes)
+        self.nodeset_configs: Dict[str, dict] = {}
 
         self.logger.info("SchedulerQueue initialized")
     
@@ -79,7 +91,7 @@ class SchedulerQueue(threading.Thread):
         self.running = False
     
     def _initialize_pipelines(self):
-        """Load pipeline configs and project->pipeline mappings from YAML files."""
+        """Load pipeline/project/job/nodeset configs from YAML files."""
         try:
             pipelines_path = os.path.join(self.yaml_dir, 'pipelines.yaml')
             loader = PipelineConfigLoader(pipelines_path)
@@ -101,13 +113,28 @@ class SchedulerQueue(threading.Thread):
                 project_name = project.get('name')
                 if not project_name:
                     continue
-                # A project participates in a pipeline if the pipeline name is a key in the project
                 pipelines_for_project = [p for p in self.pipeline_configs if p in project]
                 self.project_pipelines[project_name] = pipelines_for_project
                 for pipeline_name in pipelines_for_project:
                     jobs = project.get(pipeline_name, {}).get('jobs', [])
                     self.project_pipeline_jobs[(project_name, pipeline_name)] = jobs
                 self.logger.info("Project %s -> pipelines %s", project_name, pipelines_for_project)
+
+            # Load job configs (nodeset, timeout, run playbooks, etc.)
+            jobs_path = os.path.join(self.yaml_dir, 'jobs.yaml')
+            with open(jobs_path, 'r') as f:
+                jobs_data = yaml.safe_load(f) or {}
+            for item in jobs_data.get('jobs', []):
+                job = item.get('job', {})
+                self.job_configs[job['name']] = job
+
+            # Load nodeset configs.
+            nodesets_path = os.path.join(self.yaml_dir, 'nodesets.yaml')
+            with open(nodesets_path, 'r') as f:
+                nodesets_data = yaml.safe_load(f) or {}
+            for item in nodesets_data.get('nodesets', []):
+                nodeset = item.get('nodeset', {})
+                self.nodeset_configs[nodeset['name']] = nodeset
 
         except Exception as e:
             self.logger.error("Error initializing pipelines: %s", e, exc_info=True)
@@ -230,7 +257,18 @@ class SchedulerQueue(threading.Thread):
                     if _is_gate and succeeded:
                         self.logger.info("Gate pipeline succeeded for change %s — submitting to Gerrit", _cid)
                         self.gerrit_conn.submit_change(_cid)
-                    self.redis.queue_remove(f"torri:pipeline:{_pname}:queue", _cid)
+                    # Only remove this change from the queue when the patchset that
+                    # started this run is still the one finishing it.  If a new
+                    # patchset arrived while we were running, its own on_done handles
+                    # its own removal and we must not clobber that.
+                    current_change = self.source.getChange(_cid, _ps)
+                    if current_change is None or str(current_change.patchset) == str(_ps):
+                        self.redis.queue_remove(f"torri:pipeline:{_pname}:queue", _cid)
+                    else:
+                        self.logger.info(
+                            "Patchset %s for change %s is superseded by patchset %s — skipping queue remove",
+                            _ps, _cid, current_change.patchset,
+                        )
                     refresh_status(self.redis, list(self.pipeline_configs.keys()))
 
                 def on_merge_done(
@@ -240,6 +278,9 @@ class SchedulerQueue(threading.Thread):
                     _on_done=on_done,
                     _cid=change_id,
                     _pname=pipeline_name,
+                    _ps=captured_patchset,
+                    _project=project_name,
+                    _branch=branch,
                 ):
                     if error:
                         self.logger.error(
@@ -256,10 +297,24 @@ class SchedulerQueue(threading.Thread):
                         _on_done(False)
                         return
                     self.logger.info(
-                        "Merge ref ready for change %s pipeline %s: %s — launching %d job(s)",
+                        "Merge ref ready for change %s pipeline %s: %s — dispatching %d job(s)",
                         _cid, _pname, synthetic_ref, len(_jnames),
                     )
-                    launch_jobs(_cid, _pname, _jnames, self.redis, _on_done, synthetic_ref=synthetic_ref)
+                    executor_dispatcher.dispatch(
+                        change_id=_cid,
+                        patchset=_ps,
+                        pipeline=_pname,
+                        project=_project,
+                        branch=_branch,
+                        job_names=_jnames,
+                        job_configs=self.job_configs,
+                        nodeset_configs=self.nodeset_configs,
+                        synthetic_ref=synthetic_ref,
+                        merger_base_url=self.merger_base_url,
+                        kafka_bootstrap=self.kafka_bootstrap,
+                        redis=self.redis,
+                        on_done=_on_done,
+                    )
 
                 if not captured_ref:
                     self.logger.error(

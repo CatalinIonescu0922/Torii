@@ -1,10 +1,16 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useStatusPolling } from '../hooks/useStatusPolling';
+import { LogPanel } from './LogPanel';
 import type { Pipeline, Change, Job } from '../types/status';
 
+interface SelectedJob {
+  job_uuid: string;
+  job_name: string;
+}
+
 export function Dashboard() {
-  // Polling every 5 seconds (5000ms), no websockets used.
   const { data, error, isPolling, togglePolling } = useStatusPolling(5000);
+  const [selectedJob, setSelectedJob] = useState<SelectedJob | null>(null);
 
   if (error) {
     return <div className="p-4 text-red-500">Error fetching status: {error.message}</div>;
@@ -15,8 +21,8 @@ export function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-8 font-sans">
-      
+    <div className="min-h-screen bg-gray-50 p-8 font-sans" style={selectedJob ? { paddingBottom: '42vh' } : {}}>
+
       {/* Header */}
       <header className="flex justify-between items-center mb-8 border-b pb-4">
         <div>
@@ -25,7 +31,7 @@ export function Dashboard() {
             Last Updated: {new Date(data.last_updated).toLocaleTimeString()}
           </p>
         </div>
-        <button 
+        <button
           onClick={togglePolling}
           className={`px-4 py-2 rounded font-medium shadow-sm transition ${
             isPolling ? 'bg-red-50 text-red-600 hover:bg-red-100' : 'bg-green-50 text-green-600 hover:bg-green-100'
@@ -38,14 +44,23 @@ export function Dashboard() {
       {/* Pipelines Area */}
       <div className="grid gap-8 grid-cols-1 xl:grid-cols-2">
         {data.pipelines.map(pipeline => (
-          <PipelineView key={pipeline.name} pipeline={pipeline} />
+          <PipelineView key={pipeline.name} pipeline={pipeline} onJobClick={setSelectedJob} />
         ))}
       </div>
+
+      {/* Sliding log panel */}
+      {selectedJob && (
+        <LogPanel
+          jobUuid={selectedJob.job_uuid}
+          jobName={selectedJob.job_name}
+          onClose={() => setSelectedJob(null)}
+        />
+      )}
     </div>
   );
 }
 
-function PipelineView({ pipeline }: { pipeline: Pipeline }) {
+function PipelineView({ pipeline, onJobClick }: { pipeline: Pipeline; onJobClick: (j: SelectedJob) => void }) {
   return (
     <div className="bg-white rounded-xl shadow-md border overflow-hidden">
       <div className="bg-slate-800 px-6 py-4">
@@ -58,7 +73,7 @@ function PipelineView({ pipeline }: { pipeline: Pipeline }) {
           <div className="text-center text-gray-400 italic py-10">No items currently enqueued</div>
         ) : (
           pipeline.changes.map(change => (
-            <ChangeCard key={change.id} change={change} />
+            <ChangeCard key={change.id} change={change} onJobClick={onJobClick} />
           ))
         )}
       </div>
@@ -66,7 +81,7 @@ function PipelineView({ pipeline }: { pipeline: Pipeline }) {
   );
 }
 
-function ChangeCard({ change }: { change: Change }) {
+function ChangeCard({ change, onJobClick }: { change: Change; onJobClick: (j: SelectedJob) => void }) {
   return (
     <div className="bg-white border rounded-lg p-5 shadow-sm hover:shadow transition-shadow">
       <div className="flex justify-between items-start mb-4">
@@ -79,35 +94,40 @@ function ChangeCard({ change }: { change: Change }) {
           </span>
         </div>
       </div>
-      
-      {/* Job Grid for this Change */}
+
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 mt-4 border-t pt-4">
         {change.jobs.map(job => (
-          <JobBadge key={job.job_id} job={job} />
+          <JobBadge key={job.job_uuid} job={job} onJobClick={onJobClick} />
         ))}
       </div>
     </div>
   );
 }
 
-function JobBadge({ job }: { job: Job }) {
-  // Executor-agnostic badge styling (no Jenkins logic)
-  const statusColors = {
+function JobBadge({ job, onJobClick }: { job: Job; onJobClick: (j: SelectedJob) => void }) {
+  const statusColors: Record<Job['status'], string> = {
     queued: 'bg-gray-100 text-gray-600 border-gray-200',
     running: 'bg-blue-50 text-blue-700 border-blue-200 animate-pulse',
     success: 'bg-green-50 text-green-700 border-green-200',
-    failed: 'bg-red-50 text-red-700 border-red-200',
-    canceled: 'bg-orange-50 text-orange-700 border-orange-200',
+    failure: 'bg-red-50 text-red-700 border-red-200',
+    timeout: 'bg-orange-50 text-orange-700 border-orange-200',
+    cancelled: 'bg-gray-50 text-gray-500 border-gray-200',
   };
 
+  const canShowLogs = job.status !== 'queued';
+
   return (
-    <a 
-      href={job.url || "#"} 
-      target="_blank" rel="noreferrer"
-      className={`border rounded px-3 py-2 text-sm flex flex-col items-center justify-center text-center transition ${statusColors[job.status]}`}
+    <button
+      onClick={() => canShowLogs && onJobClick({ job_uuid: job.job_uuid, job_name: job.job_name })}
+      title={canShowLogs ? 'Click to view logs' : undefined}
+      className={`border rounded px-3 py-2 text-sm flex flex-col items-center justify-center text-center transition
+        ${statusColors[job.status]}
+        ${canShowLogs ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}
+      `}
     >
       <span className="font-semibold block truncate w-full">{job.job_name}</span>
       <span className="text-xs uppercase tracking-wider mt-1 opacity-80">{job.status}</span>
-    </a>
+    </button>
   );
 }
+

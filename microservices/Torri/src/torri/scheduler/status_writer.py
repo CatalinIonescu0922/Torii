@@ -1,7 +1,7 @@
 """
 Status snapshot writer.
 
-Reads pipeline queues and job states from Redis and writes a single
+Reads pipeline queues and buildset states from Redis and writes a single
 JSON blob under torri:ui:status that the web API server can serve.
 
 Called by the scheduler after every change enqueue and every job completion.
@@ -18,6 +18,8 @@ import logging
 from torri.scheduler.redis_client import TorriRedis
 
 STATUS_KEY = "torri:ui:status"
+BUILDSET_LOOKUP_PREFIX = "torri:change:buildset:"
+BUILDSET_KEY_PREFIX = "torri:buildset:"
 
 logger = logging.getLogger("torri.scheduler.status_writer")
 
@@ -62,8 +64,6 @@ def _build_pipeline_changes(redis: TorriRedis, pipeline_name: str) -> List[dict]
 
 
 def _build_change(redis: TorriRedis, pipeline_name: str, change_id: str) -> dict:
-    # Read the enriched change object from Redis (stored as pickle during enrichment).
-    # Avoids any network call — the change is already there from when it was queued.
     cached_change = redis.get_change(change_id)
 
     subject = ""
@@ -81,7 +81,7 @@ def _build_change(redis: TorriRedis, pipeline_name: str, change_id: str) -> dict
         patchset = str(cached_change.patchset)
         url = cached_change.url
 
-    jobs = _collect_jobs(redis, pipeline_name, change_id)
+    buildset_uuid, jobs = _collect_jobs(redis, pipeline_name, change_id, patchset)
 
     return {
         "id": change_id,
@@ -91,29 +91,36 @@ def _build_change(redis: TorriRedis, pipeline_name: str, change_id: str) -> dict
         "patchset": patchset,
         "author": author,
         "url": url,
+        "buildset_uuid": buildset_uuid,
         "jobs": jobs,
     }
 
 
-def _collect_jobs(redis: TorriRedis, pipeline_name: str, change_id: str) -> List[dict]:
-    """Scan Redis for all job keys belonging to this change+pipeline."""
-    pattern = f"torri:job:{pipeline_name}:{change_id}:*"
-    try:
-        keys = list(redis.client.scan_iter(pattern))
-    except Exception as e:
-        logger.error("Error scanning job keys for %s/%s: %s", pipeline_name, change_id, e)
-        return []
+def _collect_jobs(redis: TorriRedis, pipeline_name: str, change_id: str, patchset: str) -> tuple:
+    """
+    Look up the buildset for this change+patchset+pipeline and return its jobs.
 
-    jobs = []
-    for key in keys:
-        data = redis.get_state(key)
-        if data:
-            jobs.append({
-                "job_id": data.get("job_id", key),
-                "job_name": data.get("job_name", ""),
-                "status": data.get("status", "queued"),
-                "start_time": data.get("start_time"),
-                "end_time": data.get("end_time"),
-                "url": None,
-            })
-    return jobs
+    Returns (buildset_uuid, jobs_list).
+    """
+    if patchset:
+        lookup_key = f"{BUILDSET_LOOKUP_PREFIX}{change_id}:{patchset}:{pipeline_name}"
+        buildset_uuid = redis.client.get(lookup_key)
+    else:
+        buildset_uuid = None
+
+    if not buildset_uuid:
+        return "", []
+
+    buildset_data = redis.get_state(f"{BUILDSET_KEY_PREFIX}{buildset_uuid}")
+    if not buildset_data:
+        return buildset_uuid, []
+
+    jobs = [
+        {
+            "job_uuid": j.get("job_uuid", ""),
+            "job_name": j.get("job_name", ""),
+            "status": j.get("status", "queued"),
+        }
+        for j in buildset_data.get("jobs", [])
+    ]
+    return buildset_uuid, jobs

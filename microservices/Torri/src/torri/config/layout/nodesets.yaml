@@ -1,0 +1,12 @@
+nodesets:
+  - nodeset:
+      name: single-python
+      nodes:
+        - name: builder
+          label: python-slim
+
+  - nodeset:
+      name: single-debian
+      nodes:
+        - name: builder
+          label: debian-bookworm

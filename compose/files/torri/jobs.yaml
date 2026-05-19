@@ -1,17 +1,40 @@
-# Jenkins Job Definitions
-# Simple test jobs for demo
-
 jobs:
   - job:
-      name: verify-terraform
-  - job:
-      name: merge-terraform
-  - job:
-      name: verify-api-gateway
-  - job:
       name: unit-tests
-  - job:
-      name: check-syntax
+      nodeset: single-python
+      timeout: 600
+      run: playbooks/unit-tests/run.yaml
+
   - job:
       name: integration-tests
+      nodeset: single-python
+      timeout: 1200
+      pre-run: playbooks/integration-tests/pre.yaml
+      run: playbooks/integration-tests/run.yaml
+      post-run: playbooks/integration-tests/post.yaml
+
+  - job:
+      name: check-syntax
+      nodeset: single-python
+      timeout: 120
+      run: playbooks/check-syntax/run.yaml
+
+  - job:
+      name: verify-terraform
+      nodeset: single-python
+      timeout: 300
+      run: playbooks/verify-terraform/run.yaml
+
+  - job:
+      name: merge-terraform
+      nodeset: single-python
+      timeout: 600
+      pre-run: playbooks/merge-terraform/pre.yaml
+      run: playbooks/merge-terraform/run.yaml
+
+  - job:
+      name: verify-api-gateway
+      nodeset: single-python
+      timeout: 300
+      run: playbooks/verify-api-gateway/run.yaml
 
