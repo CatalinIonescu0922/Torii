@@ -50,6 +50,7 @@ services:
     container_name: executor_service
     volumes:
       - ./logs/executor:/app/ephemeral/logs
+      - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - torii
     depends_on:

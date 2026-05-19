@@ -94,6 +94,11 @@ RUN mkdir -p /app/logs
 # ==========================================
 FROM runtime-base AS executor
 
+# Install Docker CLI so the executor can spin up containers via the host socket.
+RUN apt-get update && \
+    apt-get install -y docker.io && \
+    rm -rf /var/lib/apt/lists/*
+
 # Copy the custom supervisord configuration for the Executor
 COPY --link compose/files/supervisor/executor/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
