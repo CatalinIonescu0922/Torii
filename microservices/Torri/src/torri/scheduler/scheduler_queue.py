@@ -241,20 +241,20 @@ class SchedulerQueue(threading.Thread):
                 captured_is_gate = isinstance(pipeline, DependentPipeline)
 
                 def on_done(
-                    succeeded,
+                    status,
                     _pc=captured_pipeline_config,
                     _ps=captured_patchset,
                     _cid=change_id,
                     _pname=pipeline_name,
                     _is_gate=captured_is_gate,
                 ):
-                    labels = _pc.success_labels if succeeded else _pc.failure_labels
-                    message = _pc.success_message if succeeded else _pc.failure_message
+                    labels = _pc.success_labels if status == "succeeded" else _pc.failure_labels
+                    message = _pc.success_message if status == "succeeded" else _pc.failure_message
                     if _ps and labels:
                         self.gerrit_conn.set_review(_cid, _ps, message=message, labels=labels)
                     elif _ps:
                         self.gerrit_conn.set_review(_cid, _ps, message=message)
-                    if _is_gate and succeeded:
+                    if _is_gate and status == "succeeded":
                         self.logger.info("Gate pipeline succeeded for change %s — submitting to Gerrit", _cid)
                         self.gerrit_conn.submit_change(_cid)
                     # Only remove this change from the queue when the patchset that
@@ -287,14 +287,14 @@ class SchedulerQueue(threading.Thread):
                             "Merge failed for change %s pipeline %s: %s",
                             _cid, _pname, error,
                         )
-                        _on_done(False)
+                        _on_done("failed")
                         return
                     if not synthetic_ref:
                         self.logger.error(
                             "Merger returned no ref for change %s pipeline %s — cannot launch jobs",
                             _cid, _pname,
                         )
-                        _on_done(False)
+                        _on_done("failed")
                         return
                     self.logger.info(
                         "Merge ref ready for change %s pipeline %s: %s — dispatching %d job(s)",
@@ -321,7 +321,7 @@ class SchedulerQueue(threading.Thread):
                         "No patchset ref for change %s patchset %s — cannot request merge",
                         change_id, event.patch_number,
                     )
-                    on_done(False)
+                    on_done("failed")
                     continue
 
                 merge_job_id = f"{pipeline_name}:{change_id}:{event.patch_number}"

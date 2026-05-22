@@ -54,7 +54,7 @@ def dispatch(
     merger_base_url: str,
     kafka_bootstrap: str,
     redis: TorriRedis,
-    on_done: Callable[[bool], None],
+    on_done: Callable[[str], None],
 ) -> str:
     """
     Create a buildset and dispatch all jobs to the executor via Kafka.
@@ -65,7 +65,7 @@ def dispatch(
     Returns the buildset_uuid.
     """
     if not job_names:
-        on_done(True)
+        on_done("succeeded")
         return ""
 
     buildset_uuid = uuid.uuid4().hex
@@ -137,7 +137,7 @@ def dispatch(
         logger.error("Failed to dispatch jobs for buildset=%s: %s", buildset_uuid, e, exc_info=True)
         with _pending_lock:
             _pending.pop(buildset_uuid, None)
-        on_done(False)
+        on_done("failed")
         return buildset_uuid
 
     return buildset_uuid
@@ -179,4 +179,4 @@ def on_job_result(job_uuid: str, buildset_uuid: str, job_name: str,status : str)
     redis.set_state(redis_key, buildset.to_dict())
 
     if all_done:
-        entry["on_done"](not entry["failed"])
+        entry["on_done"]("failed" if entry["failed"] else "succeeded")
