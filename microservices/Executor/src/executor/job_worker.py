@@ -31,6 +31,8 @@ from executor.runners.docker_runner import DockerRunner
 from executor.runners.ssh_runner import SshRunner
 from executor.node_pool import NodePool
 from confluent_kafka import Producer
+from pathlib import Path
+
 
 logger = logging.getLogger("executor.job_worker")
 
@@ -238,12 +240,15 @@ class JobWorker:
             yaml.dump(inventory_data, f, default_flow_style=False)
 
     def _write_ansible_cfg(self, runner: BaseRunner) -> None:
+        action_plugins_path = Path(__file__).resolve().parent / "ansible_plugins" / "action"
+
         cfg_path = os.path.join(self.job_dir, "ansible", "ansible.cfg")
         extras = runner.ansible_cfg_extras()
         with open(cfg_path, "w") as f:
             f.write("[defaults]\n")
             f.write(f"inventory = {os.path.join(self.job_dir, 'ansible', 'inventory.yaml')}\n")
             f.write(f"roles_path = {os.path.join(self.job_dir, 'src', 'roles')}\n")
+            f.write(f"action_plugins = {action_plugins_path}\n")
             f.write("host_key_checking = False\n")
             if extras:
                 f.write(extras)
