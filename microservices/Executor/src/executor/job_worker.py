@@ -30,6 +30,7 @@ from executor.runners.base import BaseRunner
 from executor.runners.docker_runner import DockerRunner
 from executor.runners.ssh_runner import SshRunner
 from executor.node_pool import NodePool
+from confluent_kafka import Producer
 
 logger = logging.getLogger("executor.job_worker")
 
@@ -58,50 +59,71 @@ class JobWorker:
 
     def run(self) -> None:
         try:
-            succeeded = self._execute()
+            if (self._execute()):
+                self._publish_result("success")
+            else:
+                self._publish_result("failure")
         except Exception as e:
             logger.error("Unexpected error in job %s: %s", self.job_uuid, e, exc_info=True)
             self.log.write(f"FATAL: {e}")
-            succeeded = False
+            self._publish_result("failure")
         finally:
             self.log.write_eof()
             self.semaphore.release()
 
-        self._publish_result(succeeded)
-
     def _execute(self) -> bool:
+        logger.info("[JOB] Starting execution for job_uuid=%s buildset=%s project=%s", self.job_uuid, self.buildset_uuid, self.project)
         self._setup_job_dir()
+        logger.info("[JOB] Job directory created at %s", self.job_dir)
+        
         self._clone_project()
+        logger.info("[JOB] Project cloned successfully at synthetic_ref=%s", self.synthetic_ref)
+        
+        self._inject_playbooks()
+        logger.info("[JOB] Playbooks injected into project")
 
+        logger.info("[JOB] Creating runner with nodeset_config=%s", self.nodeset_config)
         runner = self._make_runner()
+        logger.info("[JOB] Runner created: type=%s", type(runner).__name__)
+        
         try:
+            logger.info("[JOB] Acquiring runner (container/node) for execution")
             runner.acquire(self.job_uuid)
+            logger.info("[JOB] Runner acquired successfully")
         except RuntimeError as e:
+            logger.error("[JOB] Failed to acquire runner: %s", e)
             self.log.write(f"ERROR: {e}")
             return False
 
         try:
+            logger.info("[JOB] Writing Ansible inventory and config")
             self._write_inventory(runner)
             self._write_ansible_cfg(runner)
-            return self._run_playbooks()
+            logger.info("[JOB] Inventory and config written, starting playbooks")
+            self._publish_result("running")
+            success = self._run_playbooks()
+            logger.info("[JOB] Playbooks completed with success=%s", success)
+            return success
         finally:
+            logger.info("[JOB] Releasing runner")
             runner.release()
+            logger.info("[JOB] Runner released, cleaning up job directory")
             self._cleanup_job_dir()
+            logger.info("[JOB] Job execution completed")
 
     def _setup_job_dir(self) -> None:
         os.makedirs(os.path.join(self.job_dir, "src"), exist_ok=True)
-        os.makedirs(os.path.join(self.job_dir, "playbooks"), exist_ok=True)
+        os.makedirs(os.path.join(self.job_dir, "src", "playbooks"), exist_ok=True)
         os.makedirs(os.path.join(self.job_dir, "ansible"), exist_ok=True)
         self.log.write(f"Job directory: {self.job_dir}")
 
     def _clone_project(self) -> None:
-        # The merger stores each repo using only the last component of the
-        # Gerrit project name (e.g. "api-gateway" from "services/api-gateway").
-        # Build an absolute SSH path that matches the merger's workspace layout.
-        repo_name = self.project.split("/")[-1]
+        repo_name = self.project.split("/")[-1].replace(".git", "")
         repo_path = f"{self.config.merger_workspace_path}/{repo_name}"
         merger_url = f"ssh://{self.config.merger_user}@{self.config.merger_host}:{self.config.merger_port}{repo_path}"
         src_dir = os.path.join(self.job_dir, "src")
+        
+        logger.info("[CLONE] Fetching from merger: url=%s ref=%s", merger_url, self.synthetic_ref)
         self.log.write(f"Fetching {merger_url} ref={self.synthetic_ref}")
 
         env = os.environ.copy()
@@ -110,8 +132,10 @@ class JobWorker:
         # Init an empty repo and fetch only the exact synthetic ref the merger
         # prepared. This avoids downloading the default branch first and then
         # fetching on top — one round-trip, one commit.
+        logger.debug("[CLONE] Running git init \"% s\"", src_dir)
         subprocess.run(["git", "init", src_dir], capture_output=True, check=True)
 
+        logger.debug("[CLONE] Running git fetch from merger...")
         result = subprocess.run(
             ["git", "-C", src_dir, "fetch", "--depth=1", merger_url, self.synthetic_ref],
             capture_output=True,
@@ -119,61 +143,119 @@ class JobWorker:
             env=env,
         )
         if result.returncode != 0:
+            logger.error("[CLONE] Git fetch FAILED with returncode=%d", result.returncode)
+            logger.error("[CLONE] stderr: %s", result.stderr[:500])
+            logger.error("[CLONE] stdout: %s", result.stdout[:500])
             raise RuntimeError(f"git fetch failed: {result.stderr.strip()}")
 
+        logger.debug("[CLONE] Running git checkout FETCH_HEAD")
         subprocess.run(
             ["git", "-C", src_dir, "checkout", "FETCH_HEAD"],
             capture_output=True,
             check=True,
             env=env,
         )
+        logger.info("[CLONE] Successfully fetched and checked out project at %s", src_dir)
         self.log.write("Fetch complete")
+
+    def _inject_playbooks(self) -> None:
+        """Copy project-specific playbooks from image into cloned project."""
+        # The playbooks are stored in /app/project-playbooks/{project_shortname}/playbooks/
+        # We need to copy the playbooks/ subdirectory to {job_dir}/src/playbooks/
+        project_shortname = self.project.split('/')[-1]
+        source_playbooks = f"/app/project-playbooks/{project_shortname}/playbooks"
+        dest_playbooks = os.path.join(self.job_dir, "src", "playbooks")
+        
+        logger.info("[INJECT] Attempting to inject playbooks: source=%s dest=%s", source_playbooks, dest_playbooks)
+        
+        if os.path.isdir(source_playbooks):
+            try:
+                logger.info("[INJECT] Source directory exists, copying playbooks...")
+                # Copy individual files/dirs from source to dest
+                for item in os.listdir(source_playbooks):
+                    src_item = os.path.join(source_playbooks, item)
+                    dst_item = os.path.join(dest_playbooks, item)
+                    logger.debug("[INJECT] Copying %s to %s", src_item, dst_item)
+                    if os.path.isdir(src_item):
+                        shutil.copytree(src_item, dst_item, dirs_exist_ok=True)
+                    else:
+                        shutil.copy2(src_item, dst_item)
+                logger.info("[INJECT] Successfully injected playbooks from %s", source_playbooks)
+                self.log.write(f"Injected playbooks from {source_playbooks}")
+            except Exception as e:
+                logger.error("[INJECT] Failed to inject playbooks: %s", e, exc_info=True)
+                self.log.write(f"WARNING: Failed to inject playbooks: {e}")
+        else:
+            logger.warning("[INJECT] Source playbooks directory NOT FOUND: %s", source_playbooks)
+            self.log.write(f"WARNING: No playbooks found at {source_playbooks}")
 
     def _make_runner(self) -> BaseRunner:
         nodes = self.nodeset_config.get("nodes", [])
+        logger.debug("[RUNNER] Nodeset has %d nodes", len(nodes))
         if not nodes:
+            logger.error("[RUNNER] ERROR: nodeset_config has no nodes!")
+            logger.error("[RUNNER] nodeset_config dump: %s", self.nodeset_config)
             raise RuntimeError("nodeset has no nodes")
 
         # Only the first node is used for now (single-node nodesets cover most cases).
         node = nodes[0]
         label = node.get("label", "")
         node_name = node.get("name", "builder")
+        logger.info("[RUNNER] Using node_name=%s label=%s", node_name, label)
 
         # Try Docker first: if the label maps to a Docker image, use DockerRunner.
         image = self.config.get_image_for_label(label)
         if image:
+            logger.info("[RUNNER] Found Docker image for label=%s: image=%s", label, image)
             return DockerRunner(node_name=node_name, image=image)
 
         # Fall back to SSH runner from the node pool.
+        logger.info("[RUNNER] No Docker image, trying SSH pool...")
         if self._node_pool is None:
             self._node_pool = NodePool(self.config.nodes_config, self.config.redis_url)
 
         if not self._node_pool.has_label(label):
+            logger.error("[RUNNER] No SSH runner available for label=%s", label)
             raise RuntimeError(f"No runner available for label={label}")
 
+        logger.info("[RUNNER] Found SSH runner for label=%s", label)
         return SshRunner(node_name=node_name, label=label, pool=self._node_pool)
 
     def _write_inventory(self, runner: BaseRunner) -> None:
-        inventory_path = os.path.join(self.job_dir, "ansible", "inventory")
+        import yaml
+        inventory_path = os.path.join(self.job_dir, "ansible", "inventory.yaml")
+        
+        # Build YAML inventory structure
+        inventory_data = {
+            "all": {
+                "hosts": {
+                    runner.node_name: runner.inventory_vars()
+                }
+            }
+        }
+        
         with open(inventory_path, "w") as f:
-            f.write("[job_nodes]\n")
-            f.write(runner.inventory_line() + "\n")
+            yaml.dump(inventory_data, f, default_flow_style=False)
 
     def _write_ansible_cfg(self, runner: BaseRunner) -> None:
         cfg_path = os.path.join(self.job_dir, "ansible", "ansible.cfg")
         extras = runner.ansible_cfg_extras()
         with open(cfg_path, "w") as f:
             f.write("[defaults]\n")
-            f.write(f"inventory = {os.path.join(self.job_dir, 'ansible', 'inventory')}\n")
+            f.write(f"inventory = {os.path.join(self.job_dir, 'ansible', 'inventory.yaml')}\n")
             f.write(f"roles_path = {os.path.join(self.job_dir, 'src', 'roles')}\n")
             f.write("host_key_checking = False\n")
             if extras:
                 f.write(extras)
 
     def _run_playbooks(self) -> bool:
-        inventory = os.path.join(self.job_dir, "ansible", "inventory")
+        inventory = os.path.join(self.job_dir, "ansible", "inventory.yaml")
         ansible_cfg = os.path.join(self.job_dir, "ansible", "ansible.cfg")
         timeout = self.job_config.get("timeout", 600)
+        logger.info("[PLAYBOOK] Starting playbook execution timeout=%ds", timeout)
+        logger.info("[PLAYBOOK] inventory=%s", inventory)
+        logger.info("[PLAYBOOK] ansible_cfg=%s", ansible_cfg)
+        logger.debug("[PLAYBOOK] job_config=%s", self.job_config)
 
         phases = []
         if self.job_config.get("pre-run"):
@@ -182,10 +264,19 @@ class JobWorker:
         if self.job_config.get("post-run"):
             phases.append(("post-run", self.job_config["post-run"]))
 
+        logger.info("[PLAYBOOK] Total phases to execute: %d", len(phases))
         for phase_name, playbook_ref in phases:
             playbooks = [playbook_ref] if isinstance(playbook_ref, str) else playbook_ref
             for playbook in playbooks:
                 playbook_path = os.path.join(self.job_dir, "src", playbook)
+                logger.info("[PLAYBOOK] Checking if playbook exists: %s", playbook_path)
+                if not os.path.exists(playbook_path):
+                    logger.error("[PLAYBOOK] PLAYBOOK FILE NOT FOUND: %s", playbook_path)
+                    logger.error("[PLAYBOOK] Available files in job_dir: %s", os.listdir(self.job_dir) if os.path.exists(self.job_dir) else "job_dir missing")
+                    self.log.write(f"ERROR: Playbook file not found: {playbook_path}")
+                    return False
+                
+                logger.info("[PLAYBOOK] Executing %s: %s", phase_name, playbook)
                 self.log.write(f"--- {phase_name}: {playbook} ---")
 
                 rc = run_playbook(
@@ -198,13 +289,16 @@ class JobWorker:
                     timeout=timeout,
                 )
 
+                logger.info("[PLAYBOOK] Phase %s completed with rc=%d", phase_name, rc)
                 if rc != 0:
+                    logger.error("[PLAYBOOK] PHASE FAILED: %s", phase_name)
                     self.log.write(f"FAILED: {phase_name} exited with code {rc}")
                     # post-run always runs even after failure.
                     if phase_name != "post-run":
                         self._run_post_run_on_failure(inventory, ansible_cfg, timeout)
                     return False
 
+        logger.info("[PLAYBOOK] All playbook phases completed successfully")
         return True
 
     def _run_post_run_on_failure(self, inventory, ansible_cfg, timeout) -> None:
@@ -231,14 +325,11 @@ class JobWorker:
         except Exception as e:
             logger.warning("Could not clean up job dir %s: %s", self.job_dir, e)
 
-    def _publish_result(self, succeeded: bool) -> None:
-        status = "success" if succeeded else "failure"
+    def _publish_result(self, status: str) -> None:
         self.log.write(f"Job finished: {status}")
         logger.info("Job %s finished: %s", self.job_uuid, status)
 
         try:
-            from confluent_kafka import Producer
-
             producer = Producer({"bootstrap.servers": self.config.kafka_bootstrap})
             result_payload = json.dumps({
                 "job_uuid": self.job_uuid,

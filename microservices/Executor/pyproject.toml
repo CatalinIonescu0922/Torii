@@ -8,6 +8,7 @@ dependencies = [
     "confluent-kafka>=2.13.0",
     "redis>=5.0.0",
     "pyyaml>=6.0.3",
+    "ansible>=9.0.0",
 ]
 
 [project.scripts]

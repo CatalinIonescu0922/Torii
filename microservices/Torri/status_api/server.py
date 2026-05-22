@@ -11,7 +11,9 @@ Endpoints:
 
 import asyncio
 import json
+import logging
 import os
+import websockets
 from datetime import datetime, timezone
 
 import redis as redis_lib
@@ -19,6 +21,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
+logger = logging.getLogger(__name__)
 
 app.add_middleware(
     CORSMiddleware,
@@ -36,7 +39,7 @@ EMPTY_RESPONSE = {
 }
 
 _redis = redis_lib.from_url(
-    os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+    os.getenv("REDIS_URL", "redis://redis:6379/0"),
     decode_responses=True,
 )
 
@@ -75,18 +78,45 @@ async def job_logs(websocket: WebSocket, job_uuid: str):
     key = f"{LOG_KEY_PREFIX}{job_uuid}"
     cursor = 0
 
+    logger.info("WebSocket connected for job_uuid=%s key=%s", job_uuid, key)
+
     try:
         while True:
-            lines = _redis.lrange(key, cursor, -1)
+            try:
+                lines = _redis.lrange(key, cursor, -1)
+            except Exception as exc:
+                logger.warning("Redis read failed for job_uuid=%s: %s", job_uuid, exc)
+                await asyncio.sleep(1.0)
+                continue
+
             for line in lines:
                 cursor += 1
-                await websocket.send_text(line)
-                if line == "__EOF__":
+                try:
+                    await websocket.send_text(line)
+                except WebSocketDisconnect:
+                    logger.info("WebSocket disconnected while sending job_uuid=%s", job_uuid)
                     return
+                except Exception as exc:
+                    logger.warning("WebSocket send failed for job_uuid=%s: %s", job_uuid, exc)
+                    return
+
+                if line == "__EOF__":
+                    try:
+                        await websocket.close(code=1000)
+                    except Exception:
+                        pass
+                    return
+
             # No new lines yet — wait before polling again.
             await asyncio.sleep(0.2)
     except WebSocketDisconnect:
-        pass
+        logger.info("WebSocket disconnected for job_uuid=%s", job_uuid)
+    except Exception as exc:
+        logger.exception("Unexpected websocket error for job_uuid=%s: %s", job_uuid, exc)
+        try:
+            await websocket.close(code=1011)
+        except Exception:
+            pass
 
 
 @app.get("/health")

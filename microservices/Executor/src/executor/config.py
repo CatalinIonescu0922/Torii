@@ -7,8 +7,11 @@ this module, or can be overridden via EXECUTOR_CONF env var.
 """
 
 import configparser
+import logging
 import os
 from pathlib import Path
+
+logger = logging.getLogger("executor.config")
 
 
 class ExecutorConfig:
@@ -19,10 +22,14 @@ class ExecutorConfig:
                 str(Path(__file__).resolve().parent / "executor.conf"),
             )
 
+        logger.info("[CONFIG] Loading configuration from: %s", config_file)
         self._config = configparser.ConfigParser()
         if not os.path.exists(config_file):
+            logger.error("[CONFIG] Configuration file not found: %s", config_file)
             raise FileNotFoundError(f"Executor config not found: {config_file}")
+        
         self._config.read(config_file)
+        logger.info("[CONFIG] Configuration loaded successfully")
 
     def _get(self, section: str, key: str, fallback: str = "") -> str:
         return self._config.get(section, key, fallback=fallback)

@@ -25,18 +25,25 @@ def run_executor(args):
     from executor.config import ExecutorConfig
     from executor.job_worker import JobWorker
     
+    logger.info("[EXECUTOR] Loading configuration...")
     config = ExecutorConfig()
+    logger.info("[EXECUTOR] Config loaded: kafka_bootstrap=%s group=%s topic=%s", config.kafka_bootstrap, config.kafka_group_id, config.job_requests_topic)
+    logger.info("[EXECUTOR] max_workers=%d job_dir=%s use_bwrap=%s", config.max_workers, config.job_dir, config.use_bwrap)
+    logger.info("[EXECUTOR] merger: host=%s port=%d user=%s workspace=%s", config.merger_host, config.merger_port, config.merger_user, config.merger_workspace_path)
     
     semaphore = threading.Semaphore(config.max_workers)
+    logger.info("[EXECUTOR] Semaphore created with max_workers=%d", config.max_workers)
     stop_event = threading.Event()
 
     def _on_signal(signum, frame):
-        logger.info("Signal %d received — shutting down", signum)
+        logger.info("[EXECUTOR] Signal %d received — shutting down gracefully", signum)
         stop_event.set()
 
     signal.signal(signal.SIGTERM, _on_signal)
     signal.signal(signal.SIGINT, _on_signal)
+    logger.debug("[EXECUTOR] Signal handlers registered")
 
+    logger.info("[EXECUTOR] Connecting to Kafka: %s", config.kafka_bootstrap)
     consumer = Consumer({
         "bootstrap.servers": config.kafka_bootstrap,
         "group.id": config.kafka_group_id,
@@ -44,7 +51,7 @@ def run_executor(args):
         "enable.auto.commit": False,
     })
     consumer.subscribe([config.job_requests_topic])
-    logger.info("Executor started. Listening on %s", config.job_requests_topic)
+    logger.info("[EXECUTOR] Subscribed to Kafka topic: %s", config.job_requests_topic)
 
     try:
         while not stop_event.is_set():
@@ -53,30 +60,39 @@ def run_executor(args):
                 continue
             if msg.error():
                 if msg.error().code() != KafkaError._PARTITION_EOF:
-                    logger.error("Kafka error: %s", msg.error())
+                    logger.error("[EXECUTOR] Kafka consumer error: %s", msg.error())
                 continue
 
             try:
                 payload = json.loads(msg.value().decode("utf-8"))
             except Exception as e:
-                logger.warning("Unreadable job-request: %s", e)
+                logger.error("[EXECUTOR] Failed to parse job-request: %s", e)
                 consumer.commit(asynchronous=False)
                 continue
 
             consumer.commit(asynchronous=False)
 
             job_uuid = payload.get("job_uuid", "unknown")
-            logger.info("Accepted job=%s buildset=%s", job_uuid, payload.get("buildset_uuid", ""))
+            buildset = payload.get("buildset_uuid", "unknown")
+            project = payload.get("project", "unknown")
+            logger.info("[EXECUTOR] Accepted job=%s buildset=%s project=%s", job_uuid, buildset, project)
+            logger.debug("[EXECUTOR] Payload keys: %s", list(payload.keys()))
 
             # Acquire the semaphore before spawning — blocks here if max_workers
             # are already busy.  Released by the worker thread when it finishes.
+            logger.debug("[EXECUTOR] Acquiring semaphore (active workers before: %d)", config.max_workers - semaphore._value)
             semaphore.acquire()
+            logger.debug("[EXECUTOR] Semaphore acquired, spawning worker thread")
 
             worker = JobWorker(config, payload, semaphore)
             t = threading.Thread(target=worker.run, daemon=True, name=f"job-{job_uuid}")
+            logger.info("[EXECUTOR] Spawning worker thread: %s", t.name)
             t.start()
 
+    except Exception as e:
+        logger.error("[EXECUTOR] Fatal error in executor loop: %s", e, exc_info=True)
     finally:
+        logger.info("[EXECUTOR] Executor shutting down, closing Kafka consumer")
         consumer.close()
         logger.info("Executor stopped")
 

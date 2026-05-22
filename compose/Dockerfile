@@ -95,9 +95,7 @@ RUN mkdir -p /app/logs
 FROM runtime-base AS executor
 
 # Install Docker CLI so the executor can spin up containers via the host socket.
-RUN apt-get update && \
-    apt-get install -y docker.io && \
-    rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y docker-cli && rm -rf /var/lib/apt/lists/*
 
 # Copy the custom supervisord configuration for the Executor
 COPY --link compose/files/supervisor/executor/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
@@ -110,6 +108,10 @@ COPY --link compose/files/ssh/Torri_ed25519 /root/.ssh/Torri_ed25519
 COPY --link compose/files/ssh/config /root/.ssh/config
 
 RUN chmod 700 /root/.ssh && chmod 600 /root/.ssh/Torri_ed25519
+
+# Copy project-specific playbooks into the image
+# These will be injected into cloned repos by the job_worker
+COPY --link compose/files/projects/ /app/project-playbooks/
 
 # Create executor working directories
 RUN mkdir -p /var/torii/jobs /etc/torri /app/logs

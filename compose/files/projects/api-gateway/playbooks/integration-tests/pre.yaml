@@ -9,7 +9,8 @@
       changed_when: False
 
     - name: Verify urllib3 installed
-      shell: python3 -c "import urllib3; print(f'urllib3 version: {urllib3.__version__}')"
+      shell: > 
+        python3 -c "import urllib3; print(f'urllib3 version: {urllib3.__version__}')"
       register: urllib3_version
       changed_when: False
 

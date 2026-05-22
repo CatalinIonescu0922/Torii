@@ -9,7 +9,8 @@
       changed_when: False
 
     - name: Verify package installed
-      shell: python3 -c "import requests; print(f'requests version: {requests.__version__}')"
+      shell: >
+        python3 -c "import requests; print(f'requests version: {requests.__version__}')"
       register: pkg_version
       changed_when: False
 

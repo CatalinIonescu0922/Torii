@@ -14,10 +14,10 @@
         print(f"urllib3 version: {urllib3.__version__}")
         print(f"Starting 25-second integration loop")
         
-        for second in range(1, 26):
+        for second in range(1, 600):
             http = urllib3.PoolManager()
             status = "OK" if http else "FAIL"
-            print(f"[{second:2d}s] Integration pool #{second} - status: {status} - connection pooling operational")
+            print(f"[{second:2d}s] Integration pool #{second} - status: {status} - connection pooling operational\n")
             time.sleep(1)
         
         print("===== INTEGRATION PASS =====")

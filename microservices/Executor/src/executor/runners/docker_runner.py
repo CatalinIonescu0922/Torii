@@ -31,29 +31,40 @@ class DockerRunner(BaseRunner):
             self.image,
             "sleep", "infinity",
         ]
+        logger.info("[DOCKER] Executing docker run: image=%s container=%s", self.image, self.container_name)
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
+            logger.error("[DOCKER] docker run failed: returncode=%d", result.returncode)
+            logger.error("[DOCKER] stderr: %s", result.stderr[:500])
             raise RuntimeError(
                 f"Failed to start container {self.container_name}: {result.stderr.strip()}"
             )
-        logger.info("Container started: %s image=%s", self.container_name, self.image)
+        container_id = result.stdout.strip()
+        logger.info("[DOCKER] Container acquired: id=%s name=%s", container_id[:12], self.container_name)
 
     def release(self) -> None:
         if not self.container_name:
+            logger.debug("[DOCKER] No container to release")
             return
-        subprocess.run(
+        logger.info("[DOCKER] Releasing container: %s", self.container_name)
+        result = subprocess.run(
             ["docker", "rm", "-f", self.container_name],
             capture_output=True,
+            text=True,
         )
-        logger.info("Container removed: %s", self.container_name)
+        if result.returncode != 0:
+            logger.warning("[DOCKER] docker rm returned code %d: %s", result.returncode, result.stderr[:200])
+        else:
+            logger.info("[DOCKER] Container released successfully: %s", self.container_name)
 
-    def inventory_line(self) -> str:
-        return (
-            f"{self.node_name} "
-            f"ansible_connection=docker "
-            f"ansible_host={self.container_name} "
-            f"ansible_user=root"
-        )
+    def inventory_vars(self) -> dict:
+        variables = {
+            "ansible_connection": "docker",
+            "ansible_host": self.container_name,
+            "ansible_user": "root"
+        }
+        logger.debug("[DOCKER] Inventory vars: %s", variables)
+        return variables
 
     def ansible_cfg_extras(self) -> str:
         return ""

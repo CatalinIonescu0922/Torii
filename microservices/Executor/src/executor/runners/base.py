@@ -20,12 +20,11 @@ class BaseRunner(ABC):
         """Free the node after the job finishes (or fails)."""
 
     @abstractmethod
-    def inventory_line(self) -> str:
+    def inventory_vars(self) -> dict:
         """
-        Return the Ansible inventory line for this node.
+        Return the Ansible inventory variables for this node as a dictionary.
         Example:
-            builder ansible_host=172.17.0.2 ansible_connection=docker
-                    ansible_user=root
+            {"ansible_host": "torii-...", "ansible_connection": "docker", "ansible_user": "root"}
         """
 
     @abstractmethod

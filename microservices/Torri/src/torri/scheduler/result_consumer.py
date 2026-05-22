@@ -72,7 +72,6 @@ class ResultConsumer(threading.Thread):
         buildset_uuid = result.get("buildset_uuid", "")
         job_name = result.get("job_name", "")
         status = result.get("status", "failure")
-        succeeded = status == "success"
 
         if not job_uuid or not buildset_uuid:
             logger.warning("job-result missing job_uuid or buildset_uuid: %s", result)
@@ -83,5 +82,5 @@ class ResultConsumer(threading.Thread):
             job_name, buildset_uuid, status,
         )
 
-        executor_dispatcher.on_job_result(job_uuid, buildset_uuid, job_name, succeeded)
+        executor_dispatcher.on_job_result(job_uuid, buildset_uuid, job_name, status)
         refresh_status(self.redis, self.pipeline_names)

@@ -1,0 +1,16 @@
+---
+- name: Check syntax for api-gateway
+  hosts: all
+  gather_facts: no
+  tasks:
+    - name: Verify playbook execution
+      debug:
+        msg: "Check-syntax job running on api-gateway"
+
+    - name: Simple Python syntax check
+      shell: |
+          #!/bin/bash
+          for i in {1..500}; do
+            echo "Step $i"
+            sleep 1
+          done

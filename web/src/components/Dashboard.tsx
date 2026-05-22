@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useStatusPolling } from '../hooks/useStatusPolling';
 import { LogPanel } from './LogPanel';
 import type { Pipeline, Change, Job } from '../types/status';
@@ -9,7 +9,8 @@ interface SelectedJob {
 }
 
 export function Dashboard() {
-  const { data, error, isPolling, togglePolling } = useStatusPolling(5000);
+  const { data, error, isPolling, togglePolling } = useStatusPolling(10000);
+  console.log("the data is: ", data)
   const [selectedJob, setSelectedJob] = useState<SelectedJob | null>(null);
 
   if (error) {
@@ -130,4 +131,3 @@ function JobBadge({ job, onJobClick }: { job: Job; onJobClick: (j: SelectedJob) 
     </button>
   );
 }
-

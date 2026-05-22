@@ -143,7 +143,7 @@ def dispatch(
     return buildset_uuid
 
 
-def on_job_result(job_uuid: str, buildset_uuid: str, job_name: str, succeeded: bool) -> None:
+def on_job_result(job_uuid: str, buildset_uuid: str, job_name: str,status : str) -> None:
     """
     Called by result_consumer when a single job finishes.
 
@@ -160,12 +160,13 @@ def on_job_result(job_uuid: str, buildset_uuid: str, job_name: str, succeeded: b
 
         for job in buildset.jobs:
             if job.job_uuid == job_uuid:
-                job.status = "success" if succeeded else "failure"
+                job.status = status
                 break
 
-        entry["done"] += 1
-        if not succeeded:
+        if status == "failure":
             entry["failed"] = True
+        if status == "failure" or status == "success":
+            entry["done"] += 1
 
         all_done = entry["done"] == entry["total"]
 

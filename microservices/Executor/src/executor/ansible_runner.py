@@ -46,7 +46,11 @@ def run_playbook(
         write_log("ERROR: ansible-playbook not found in PATH")
         return 1
 
-    env = {**os.environ, "ANSIBLE_CONFIG": ansible_cfg_path}
+    env = {**os.environ, 
+           "ANSIBLE_CONFIG": ansible_cfg_path,
+           "PYTHONUNBUFFERED": "1",
+           "ANSIBLE_CALLBACK_RESULT_FORMAT": "yaml",
+           }
 
     ansible_cmd = [
         ansible_bin,
@@ -59,10 +63,12 @@ def run_playbook(
     else:
         cmd = ansible_cmd
 
-    logger.info("Running: %s", " ".join(cmd))
+    logger.info("[ANSIBLE] Starting playbook with inventory path : %s %s", playbook_path, inventory_path)
+    logger.debug("[ANSIBLE] Running: %s", " ".join(cmd[:5]))
     write_log(f"Running playbook: {playbook_path}")
 
     try:
+        logger.debug("[ANSIBLE] Spawning subprocess")
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
@@ -70,17 +76,25 @@ def run_playbook(
             text=True,
             env=env,
         )
+        logger.info("[ANSIBLE] Process started with pid=%d", proc.pid)
+        
+        line_count = 0
         for line in proc.stdout:
+            line_count += 1
             write_log(line.rstrip("\n"))
+        
         proc.wait(timeout=timeout)
+        logger.info("[ANSIBLE] Playbook completed: returncode=%d output_lines=%d", proc.returncode, line_count)
         return proc.returncode
 
     except subprocess.TimeoutExpired:
+        logger.error("[ANSIBLE] Playbook TIMEOUT after %ds - killing process", timeout)
         proc.kill()
         write_log(f"ERROR: playbook timed out after {timeout}s")
         return 1
 
     except Exception as e:
+        logger.error("[ANSIBLE] Exception in run_playbook: %s", e, exc_info=True)
         write_log(f"ERROR: {e}")
         return 1
 

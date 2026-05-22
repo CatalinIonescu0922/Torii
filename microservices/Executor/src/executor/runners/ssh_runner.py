@@ -35,13 +35,13 @@ class SshRunner(BaseRunner):
             logger.info("Released VM hostname=%s", self._vm["hostname"])
             self._vm = None
 
-    def inventory_line(self) -> str:
-        return (
-            f"{self.node_name} "
-            f"ansible_host={self._vm['hostname']} "
-            f"ansible_user={self._vm.get('username', 'torii')} "
-            f"ansible_connection=ssh"
-        )
+    def inventory_vars(self) -> dict:
+        variables = {
+            "ansible_connection": "ssh",
+            "ansible_host": self._vm.get("hostname"),
+            "ansible_user": self._vm.get("username", "torii")
+        }
+        return variables
 
     def ansible_cfg_extras(self) -> str:
         # ControlMaster keeps the SSH connection alive between tasks.

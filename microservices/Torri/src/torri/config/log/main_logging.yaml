@@ -50,7 +50,11 @@ loggers:
     level: WARNING
     handlers: [console, server-debug]
     propagate: false
-  
+  executor:
+    level: DEBUG
+    handlers: [server-debug]
+    propagate: false
+
   kafka:
     level: WARNING
     handlers: [console, server-debug]
