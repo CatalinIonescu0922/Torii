@@ -16,7 +16,7 @@ from torri.gerrit.gerritsource import GerritSource
 from torri.scheduler.redis_client import TorriRedis
 from torri.scheduler.scheduler_queue import SchedulerQueue
 from torri.scheduler.result_consumer import ResultConsumer
-
+from torri.scheduler.status_writer import refresh_status
 
 def _validate_yaml_files(yaml_dir: str, logger):
     """Validate all YAML files before starting. Raises on bad config."""
@@ -114,6 +114,7 @@ def main():
     # before starting the process loop initialize the data from the yaml files 
     try:
         scheduler_queue._initialize_pipelines()
+        refresh_status()
     except Exception as e:
         raise e
     scheduler_queue.start()

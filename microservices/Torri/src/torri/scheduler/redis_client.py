@@ -19,12 +19,22 @@ class TorriRedis:
     Used by scheduler to store changes, buildsets, and locks.
     """
     
+    _pools: Dict[str, redis.ConnectionPool] = {}
+    _binary_pools: Dict[str, redis.ConnectionPool] = {}
+
     def __init__(self, redis_url: Optional[str] = None):
         self.logger = get_logger("torri.scheduler.redis")
         url = redis_url or os.getenv("REDIS_URL", "redis://localhost:6379/0")
-        self.client = redis.from_url(url, decode_responses=True)
+        
+        # Cache connection pools to avoid creating a new pool for every instantiation
+        if url not in self._pools:
+            self._pools[url] = redis.ConnectionPool.from_url(url, decode_responses=True)
+        if url not in self._binary_pools:
+            self._binary_pools[url] = redis.ConnectionPool.from_url(url, decode_responses=False)
+            
+        self.client = redis.Redis(connection_pool=self._pools[url])
         # Separate client for binary (pickle) data — decode_responses must be False
-        self._binary_client = redis.from_url(url, decode_responses=False)
+        self._binary_client = redis.Redis(connection_pool=self._binary_pools[url])
         
         try:
             self.client.ping()
