@@ -8,7 +8,7 @@ pipelines:
       manager: independent
       start-message: "[Torii] Starting check jobs"
       failure-message: "[Torii] Check failed"
-      success-message: "[Torii] Check succeeded"
+      success-message: "Check succeeded"
 
       require:
         open: true
@@ -20,6 +20,9 @@ pipelines:
       trigger:
         gerrit:
           - event: patchset-created
+          - event: comment-added
+            comment: 
+              - ^recheck$
       success:
         gerrit:
           - Verified: 1
@@ -31,7 +34,7 @@ pipelines:
       name: gate
       start-message: "[Torii] Starting gate jobs"
       failure-message: "[Torii] Gate failed"
-      success-message: "[Torii] Gate succeeded"
+      success-message: "Gate succeeded"
       manager: dependent
       require:
         open: true
@@ -43,6 +46,9 @@ pipelines:
       trigger:
         gerrit:
           - event: comment-added
+            comment:
+              - ^Patch Set \d+:[^\n]* (?i:code-review|verified)
+              - ^[^\n]+\n\s+(?i:regate) 
       success:
         gerrit:
           - Gatekeeper: 1

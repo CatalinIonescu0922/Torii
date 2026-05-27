@@ -171,37 +171,41 @@ class GerritMergeDriver(MergeDriver):
         
         Calls /changes/{change_id}/submit endpoint.
         """
-        try:
-            self.logger.info(f"Submitting change {change_id} to Gerrit")
-            
-            success, response = self.gerrit_conn.submit_change(change_id)
-            
-            if success:
-                status = response.get('status')
-                commit_hash = response.get('currentRevision')
+        number_of_retries = 3
+        for atempt in range(number_of_retries):
+            try:
+                self.logger.info(f"Submitting change {change_id} to Gerrit")
                 
-                self.logger.info(f"Change {change_id} submitted successfully. Status: {status}")
+                success, response = self.gerrit_conn.submit_change(change_id)
                 
-                return True, {
-                    'status': status,
-                    'commit_hash': commit_hash,
-                    'message': f"Merged with status {status}",
-                    'submission_time': str(response.get('updated')),
-                }
-            else:
-                error = str(response)
-                self.logger.error(f"Failed to submit change {change_id}: {error}")
+                if success:
+                    status = response.get('status')
+                    commit_hash = response.get('currentRevision')
+                    
+                    self.logger.info(f"Change {change_id} submitted successfully. Status: {status}")
+                    
+                    return True, {
+                        'status': status,
+                        'commit_hash': commit_hash,
+                        'message': f"Merged with status {status}",
+                        'submission_time': str(response.get('updated')),
+                    }
+                else:
+                    error = str(response)
+                    self.logger.error(f"Failed to submit change {change_id}: {error}")
+                    return False, {
+                        'status': 'FAILED',
+                        'message': error,
+                    }
+            except Exception as e:
+                if atempt < number_of_retries:
+                    self.logger.debug(f"Submiting change {change_id} failed on atemp {atempt} of {number_of_retries} retrying...")
+                    continue
+                self.logger.error(f"Error submitting change {change_id}: {e}", exc_info=True)
                 return False, {
                     'status': 'FAILED',
-                    'message': error,
+                    'message': str(e),
                 }
-        
-        except Exception as e:
-            self.logger.error(f"Error submitting change {change_id}: {e}", exc_info=True)
-            return False, {
-                'status': 'FAILED',
-                'message': str(e),
-            }
     
     def can_submit(self, change_id: str) -> Tuple[bool, str]:
         """

@@ -7,6 +7,7 @@ import threading
 import queue
 import yaml
 import os
+import re 
 from typing import Optional, Dict, List
 
 from shared.logger_setup import get_logger
@@ -32,7 +33,6 @@ class SchedulerQueue(threading.Thread):
         yaml_dir: str,
         redis_url: Optional[str] = None,
         kafka_bootstrap: str = "kafka:9092",
-        merger_base_url: str = "http://merger:8080",
     ):
         super().__init__(daemon=True, name="SchedulerQueue")
         self.logger = get_logger("torri.scheduler.queue")
@@ -42,8 +42,6 @@ class SchedulerQueue(threading.Thread):
         self.yaml_dir = yaml_dir
         self.redis = TorriRedis(redis_url)
         self.kafka_bootstrap = kafka_bootstrap
-        self.merger_base_url = merger_base_url
-
         self.event_queue: queue.Queue = queue.Queue()
         self.running = False
         self.pipelines: Dict[str, BasePipelineManager] = {}
@@ -71,8 +69,6 @@ class SchedulerQueue(threading.Thread):
         self.logger.info("Scheduler queue thread started")
         
         try:
-            self._initialize_pipelines()
-            
             while self.running:
                 try:
                     event = self.event_queue.get(timeout=1)
@@ -187,7 +183,7 @@ class SchedulerQueue(threading.Thread):
                         event.type, trigger_events, pipeline_name,
                     )
                     continue
-
+                    
                 passed, rejection_reason = self._change_meets_requirements(event, pipeline_config)
                 if not passed:
                     reject_key = f"torri:rejected:{pipeline_name}:{change_id}:{event.patch_number}"
@@ -310,7 +306,6 @@ class SchedulerQueue(threading.Thread):
                         job_configs=self.job_configs,
                         nodeset_configs=self.nodeset_configs,
                         synthetic_ref=synthetic_ref,
-                        merger_base_url=self.merger_base_url,
                         kafka_bootstrap=self.kafka_bootstrap,
                         redis=self.redis,
                         on_done=_on_done,
@@ -408,5 +403,7 @@ class SchedulerQueue(threading.Thread):
                 return False, f"Blocked by vote: {label_name}={current_value:+d}"
 
         return True, ""
-    
+    # def verify_triggers_for_pipeline(trigger_dict : dict , event):
+    #     if event.event_source == "gerrit":
+            
 

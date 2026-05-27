@@ -102,6 +102,7 @@ class GerritTriggerEvent:
         self.query_future = None
         self.source = None
         self.change_details = None
+        self.event_source = "gerrit"
 
     def to_dict(self) -> dict:
         return {

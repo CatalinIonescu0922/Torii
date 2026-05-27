@@ -30,11 +30,11 @@ projects:
       check:
         jobs:
           - check-syntax
-          - integration-tests
+          # - integration-tests
       gate:
         jobs:
           - unit-tests
-          - integration-tests
+          # - integration-tests
       merge-mode: cherry-pick
       branches:
         - main

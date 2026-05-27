@@ -83,4 +83,5 @@ class ResultConsumer(threading.Thread):
         )
 
         executor_dispatcher.on_job_result(job_uuid, buildset_uuid, job_name, status)
+        logger.debug(f"update ui redis from result consumer for this pipelines %s" , self.pipeline_names)
         refresh_status(self.redis, self.pipeline_names)

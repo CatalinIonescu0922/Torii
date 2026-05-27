@@ -255,7 +255,7 @@ class GerritRestConnection(BaseConnection):
                 )
                 return data, related
             except Exception as e:
-                if attempt < number_of_retries - 1:
+                if attempt < number_of_retries:
                     self.logger.info(f"Querying gerrit failed on attempt {attempt + 1}, retrying...")
                     continue
                 raise GerritQueryError(f"Failed to query Gerrit change {change_number}") from e

@@ -10,19 +10,12 @@
 import voluptuous as V
 import yaml
 import os
-import sys
 from shared.gerritmodel import known_events, known_labels
-from pathlib import Path
 
 class Validator:
     @classmethod
-    def get_file_full_path(cls)-> Path:
-        main_file = sys.modules['__main__'].__file__
-        return Path(main_file).resolve().parent / 'config' / 'layout'
-
-    @classmethod
-    def getYamlData(cls,file_name : str) -> dict:
-        file_path = Validator.get_file_full_path() / file_name
+    def getYamlData(cls,file_name : str , dir_path : str) -> dict:
+        file_path = os.path.join(dir_path , file_name)
         try:
             with open(file_path , 'r') as yaml_file:
                 yaml_data = yaml.full_load(yaml_file)
@@ -174,19 +167,19 @@ class Validator:
         except V.Invalid as E:
             raise V.Invalid(f"{E} in {file_name} file ")
     @classmethod
-    def validateAllFiles(cls):
+    def validateAllFiles(cls , dir_path):
         # validation order: nodesets → jobs → pipelines → projects
         try:
-            nodesets_data = Validator.getYamlData('nodesets.yaml')
+            nodesets_data = Validator.getYamlData('nodesets.yaml', dir_path)
             nodesets_data, nodeset_names = Validator.validate(nodesets_data, 'nodesets.yaml')
 
-            jobs_data = Validator.getYamlData('jobs.yaml')
+            jobs_data = Validator.getYamlData('jobs.yaml', dir_path)
             jobs_data, job_names = Validator.validate(jobs_data, 'jobs.yaml', list_of_nodesets=nodeset_names)
 
-            pipelines_data = Validator.getYamlData('pipelines.yaml')
+            pipelines_data = Validator.getYamlData('pipelines.yaml', dir_path)
             pipelines_data, pipeline_names = Validator.validate(pipelines_data, 'pipelines.yaml')
 
-            projects_data = Validator.getYamlData('projects.yaml')
+            projects_data = Validator.getYamlData('projects.yaml', dir_path)
             projects_data, project_names = Validator.validate(
                 projects_data, 'projects.yaml',
                 list_of_pipelines=pipeline_names,

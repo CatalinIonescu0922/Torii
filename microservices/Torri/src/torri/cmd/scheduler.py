@@ -21,35 +21,15 @@ from torri.scheduler.result_consumer import ResultConsumer
 def _validate_yaml_files(yaml_dir: str, logger):
     """Validate all YAML files before starting. Raises on bad config."""
     logger.info("Validating YAML configuration files in %s", yaml_dir)
-
-    nodesets_data = _load_yaml(yaml_dir, "nodesets.yaml")
-    nodesets_data, nodeset_names = Validator.validate(nodesets_data, "nodesets.yaml")
-
-    jobs_data = _load_yaml(yaml_dir, "jobs.yaml")
-    jobs_data, job_names = Validator.validate(jobs_data, "jobs.yaml", list_of_nodesets=nodeset_names)
-
-    pipelines_data = _load_yaml(yaml_dir, "pipelines.yaml")
-    pipelines_data, pipeline_names = Validator.validate(pipelines_data, "pipelines.yaml")
-
-    projects_data = _load_yaml(yaml_dir, "projects.yaml")
-    Validator.validate(
-        projects_data, "projects.yaml",
-        list_of_pipelines=pipeline_names,
-        list_of_jobs=job_names,
-    )
-
+    result = Validator.validateAllFiles(yaml_dir)
+    job_names = result["job_names"]
+    pipeline_names = result["pipeline_names"]
+    projects_data = result["projects_data"]
     logger.info(
         "YAML validation passed: %d jobs, %d pipelines, %d projects",
         len(job_names), len(pipeline_names),
         len(projects_data.get("projects", [])),
     )
-
-
-def _load_yaml(yaml_dir: str, filename: str) -> dict:
-    path = os.path.join(yaml_dir, filename)
-    with open(path, "r") as f:
-        return yaml.safe_load(f) or {}
-
 
 def main():
     cli = TorriCLI("Torii Scheduler")
@@ -88,15 +68,12 @@ def main():
     source = GerritSource(connection=gerrit_conn, redis=gerrit_conn.redis)
 
     kafka_bootstrap = config.kafka_bootstrap_servers
-    merger_base_url = config.merger_base_url
-
     scheduler_queue = SchedulerQueue(
         gerrit_conn,
         source,
         yaml_dir=yaml_dir,
         redis_url=config.redis_url,
         kafka_bootstrap=kafka_bootstrap,
-        merger_base_url=merger_base_url,
     )
 
     # gerrit-stream-events: raw Gerrit events → GerritEventProcessor enriches and
@@ -134,7 +111,11 @@ def main():
             finally:
                 trigger_conn.eventDone()
         logger.warning("TriggerBridge exiting — scheduler_queue is no longer alive")
-
+    # before starting the process loop initialize the data from the yaml files 
+    try:
+        scheduler_queue._initialize_pipelines()
+    except Exception as e:
+        raise e
     scheduler_queue.start()
 
     bridge_thread = threading.Thread(target=_trigger_bridge, name="TriggerBridge", daemon=True)

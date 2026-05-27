@@ -51,7 +51,6 @@ def dispatch(
     job_configs: Dict[str, dict],
     nodeset_configs: Dict[str, dict],
     synthetic_ref: str,
-    merger_base_url: str,
     kafka_bootstrap: str,
     redis: TorriRedis,
     on_done: Callable[[str], None],
@@ -118,7 +117,6 @@ def dispatch(
                 "job_config": job_config,
                 "nodeset_config": nodeset_config,
                 "synthetic_ref": synthetic_ref,
-                "merger_base_url": merger_base_url,
                 "submitted_at": datetime.now(timezone.utc).isoformat(),
             }
             producer.send_message(
