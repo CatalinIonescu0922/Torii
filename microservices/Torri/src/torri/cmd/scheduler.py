@@ -114,7 +114,7 @@ def main():
     # before starting the process loop initialize the data from the yaml files 
     try:
         scheduler_queue._initialize_pipelines()
-        refresh_status()
+        refresh_status(gerrit_conn.redis, list(scheduler_queue.pipeline_configs.keys()))
     except Exception as e:
         raise e
     scheduler_queue.start()
