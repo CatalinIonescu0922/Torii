@@ -16,7 +16,6 @@ from shared.logger_setup import get_logger
 from torri.scheduler.redis_client import TorriRedis, REDIS_KEYS
 from torri.scheduler.gate_algorithm import GateAlgorithm
 
-
 class ChangeState(str, Enum):
     """States a change can be in."""
     NEW = "new"
@@ -105,10 +104,11 @@ class BasePipelineManager(ABC):
     Manages queues, windows, and change state.
     """
     
-    def __init__(self, pipeline_id: str, redis_client: TorriRedis):
+    def __init__(self, pipeline_id: str, redis_client: TorriRedis, source=None):
         self.logger = get_logger(f"torri.scheduler.pipeline.{pipeline_id}")
         self.pipeline_id = pipeline_id
         self.redis = redis_client
+        self.source = source
         self.active_builds: Dict[str, BuildSetModel] = {}
     
     @abstractmethod
@@ -260,7 +260,14 @@ class BasePipelineManager(ABC):
         except Exception as e:
             self.logger.error("Error getting buildset: %s", e)
             return None
-    
+
+    def is_change_in_pipeline(self, change_number : str):
+        queue_key = f"torri:pipeline:{self.pipeline_id}:queue"
+        change_ids = self.redis.queue_list_all(queue_key)
+        if change_number in change_ids:
+            return True
+        return False
+
     def update_buildset_status(self, buildset_id: str, status: BuildSetStatus):
         """Update buildset status."""
         try:
@@ -327,8 +334,8 @@ class DependentPipeline(BasePipelineManager):
     - Cascade failure propagation
     """
     
-    def __init__(self, pipeline_id: str, redis_client: TorriRedis, gerrit_conn=None):
-        super().__init__(pipeline_id, redis_client)
+    def __init__(self, pipeline_id: str, redis_client: TorriRedis, source=None, gerrit_conn=None):
+        super().__init__(pipeline_id, redis_client, source=source)
         self.gerrit_conn = gerrit_conn
         if gerrit_conn:
             self.gate_algorithm = GateAlgorithm(redis_client, gerrit_conn)

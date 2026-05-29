@@ -95,9 +95,9 @@ class SchedulerQueue(threading.Thread):
 
             for name, pipeline_config in self.pipeline_configs.items():
                 if pipeline_config.manager == 'dependent':
-                    self.pipelines[name] = DependentPipeline(name, self.redis, self.gerrit_conn)
+                    self.pipelines[name] = DependentPipeline(name, self.redis, source=self.source, gerrit_conn=self.gerrit_conn)
                 else:
-                    self.pipelines[name] = IndependentPipeline(name, self.redis)
+                    self.pipelines[name] = IndependentPipeline(name, self.redis, source=self.source)
                 self.logger.info("Initialized pipeline %s (manager=%s)", name, pipeline_config.manager)
 
             projects_path = os.path.join(self.yaml_dir, 'projects.yaml')
@@ -183,7 +183,15 @@ class SchedulerQueue(threading.Thread):
                         event.type, trigger_events, pipeline_name,
                     )
                     continue
-                    
+                # verify if the pipeline already runs this change 
+                if pipeline.is_change_in_pipeline(change_id):
+                    message = f"change {event.change_number} is already running in pipeline {pipeline.pipeline_id}"
+                    self.logger.debug(message)
+                    self.gerrit_conn.set_review(
+                        change_id, event.patch_number , message
+                    )
+                    continue
+
                 passed, rejection_reason = self._change_meets_requirements(event, pipeline_config)
                 if not passed:
                     reject_key = f"torri:rejected:{pipeline_name}:{change_id}:{event.patch_number}"
@@ -319,78 +327,6 @@ class SchedulerQueue(threading.Thread):
         except Exception as e:
             self.logger.error("Error processing event: %s", e, exc_info=True)
 
-    def _change_meets_requirements(self, event: GerritTriggerEvent, pipeline_config: PipelineConfig) -> tuple[bool, str]:
-        """Check open/current-patchset/label requirements against the cached change.
-
-        Returns (True, "") if the change qualifies.
-        Returns (False, reason) if it does not, where reason is a human-readable
-        explanation suitable for posting as a Gerrit comment.
-        """
-        change = self.source.getChange(event.change_number, event.patch_number)
-        self.logger.debug(
-            "Requirements check change=%s pipeline=%s labels=%s status=%s patchset=%s",
-            event.change_number, pipeline_config.name,
-            change.labels if change else None,
-            change.status if change else None,
-            change.patchset if change else None,
-        )
-
-        if pipeline_config.require_open:
-            if change is None or change.status != "NEW":
-                status = change.status if change else "unknown"
-                self.logger.info(
-                    "Change %s rejected from pipeline %s: not open (status=%s)",
-                    event.change_number, pipeline_config.name, status,
-                )
-                return False, f"Change is not open (status: {status})"
-
-        if pipeline_config.require_current_patchset:
-            if change is None or event.patch_number != str(change.patchset):
-                latest = change.patchset if change else "unknown"
-                self.logger.info(
-                    "Change %s rejected from pipeline %s: not current patchset (event=%s latest=%s)",
-                    event.change_number, pipeline_config.name,
-                    event.patch_number, latest,
-                )
-                return False, (
-                    f"Patchset {event.patch_number} is not the current patchset "
-                    f"(latest: {latest})"
-                )
-
-        if change is None:
-            return False, "Change not found"
-
-        # Check required labels — each must meet or exceed the required value
-        for label_name, required_value in pipeline_config.required_approvals.items():
-            current_value = change.labels.get(label_name, 0)
-            if current_value < required_value:
-                self.logger.info(
-                    "Change %s rejected from pipeline %s: %s is %d, need %d",
-                    event.change_number, pipeline_config.name,
-                    label_name, current_value, required_value,
-                )
-                return False, (
-                    f"Missing required vote: {label_name} is {current_value:+d}, "
-                    f"need {required_value:+d}"
-                )
-
-        # Check reject labels — if any match, block the change
-        for label_name, reject_value in pipeline_config.reject_approvals.items():
-            current_value = change.labels.get(label_name, 0)
-            blocked = (
-                current_value in reject_value
-                if isinstance(reject_value, list)
-                else current_value == reject_value
-            )
-            if blocked:
-                self.logger.info(
-                    "Change %s rejected from pipeline %s: %s=%d matches reject rule",
-                    event.change_number, pipeline_config.name,
-                    label_name, current_value,
-                )
-                return False, f"Blocked by vote: {label_name}={current_value:+d}"
-
-        return True, ""
     # def verify_triggers_for_pipeline(trigger_dict : dict , event):
     #     if event.event_source == "gerrit":
             

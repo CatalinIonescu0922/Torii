@@ -327,33 +327,6 @@ class GerritRestConnection(BaseConnection):
             self.logger.warning("Error checking mergeable status: %s", e)
             return False, str(e)
     
-    def set_review(self, change_number: str, patchset: str, message: str, labels: dict = None) -> bool:
-        """
-        Post a review/vote on a change.
-        
-        Args:
-            change_number: Change ID
-            patchset: Patchset number
-            message: Review message
-            labels: Dict of label votes, e.g., {"Code-Review": 1, "Verified": 1}
-        
-        Returns:
-            success: bool
-        """
-        try:
-            endpoint = f'changes/{change_number}/revisions/{patchset}/review'
-            payload = {
-                'message': message,
-                'labels': labels or {}
-            }
-            
-            self._post(endpoint, payload)
-            
-            self.logger.info(
-                "Posted review on change %s patchset %s",
-                change_number, patchset
-            )
-            return True
         
         except Exception as e:
             self.logger.error("Error posting review: %s", e)
