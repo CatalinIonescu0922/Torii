@@ -150,8 +150,8 @@ class SchedulerQueue(threading.Thread):
                 return
 
             self.logger.info(
-                "Processing event type=%s change=%s project=%s",
-                event.type, change_id, project_name,
+                "Processing event type=%s change=%s project=%s connection_name=%s",
+                event.type, change_id, project_name, event.event_source
             )
 
             pipeline_names = self.project_pipelines.get(project_name)
@@ -196,19 +196,7 @@ class SchedulerQueue(threading.Thread):
                             )
                     continue
 
-                # One-shot guard: if we've already started this change in this pipeline
-                # for this patchset (e.g. Kafka replay, container restart), skip entirely.
-                start_key = f"torri:started:{pipeline_name}:{change_id}:{event.patch_number}"
-                already_started = not self.redis.client.setnx(start_key, "1")
-                if already_started:
-                    self.logger.debug(
-                        "Change %s already started in pipeline %s patchset %s — skipping duplicate event",
-                        change_id, pipeline_name, event.patch_number,
-                    )
-                    continue
-                # TTL: 24 h — change should be resolved long before that
-                self.redis.client.expire(start_key, 86400)
-
+                
                 if isinstance(pipeline, DependentPipeline):
                     queue_pos = pipeline.enqueue_change(change_id, project_name, branch)
                 else:
