@@ -17,6 +17,7 @@ from torri.scheduler.redis_client import TorriRedis
 from torri.scheduler.scheduler_queue import SchedulerQueue
 from torri.scheduler.result_consumer import ResultConsumer
 from torri.scheduler.status_writer import refresh_status
+from torri.driver.gerrit import GerritDriver
 
 def _validate_yaml_files(yaml_dir: str, logger):
     """Validate all YAML files before starting. Raises on bad config."""
@@ -67,6 +68,9 @@ def main():
     )
     source = GerritSource(connection=gerrit_conn, redis=gerrit_conn.redis)
 
+    gerrit_driver = GerritDriver(connection=gerrit_conn, source=source)
+    drivers = {'gerrit': gerrit_driver}
+
     kafka_bootstrap = config.kafka_bootstrap_servers
     scheduler_queue = SchedulerQueue(
         gerrit_conn,
@@ -74,6 +78,7 @@ def main():
         yaml_dir=yaml_dir,
         redis_url=config.redis_url,
         kafka_bootstrap=kafka_bootstrap,
+        drivers=drivers,
     )
 
     # gerrit-stream-events: raw Gerrit events → GerritEventProcessor enriches and
@@ -114,7 +119,7 @@ def main():
     # before starting the process loop initialize the data from the yaml files 
     try:
         scheduler_queue._initialize_pipelines()
-        refresh_status(gerrit_conn.redis, list(scheduler_queue.pipeline_configs.keys()))
+        refresh_status(gerrit_conn.redis, list(scheduler_queue.pipelines.keys()))
     except Exception as e:
         raise e
     scheduler_queue.start()
@@ -122,11 +127,11 @@ def main():
     bridge_thread = threading.Thread(target=_trigger_bridge, name="TriggerBridge", daemon=True)
     bridge_thread.start()
 
-    # Start the result consumer after the scheduler is running so pipeline_configs are loaded.
+    # Start the result consumer after the scheduler is running so pipelines are loaded.
     result_consumer = ResultConsumer(
         kafka_bootstrap=kafka_bootstrap,
         redis=TorriRedis(config.redis_url),
-        pipeline_names=list(scheduler_queue.pipeline_configs.keys()),
+        pipeline_names=list(scheduler_queue.pipelines.keys()),
     )
     result_consumer.start()
 

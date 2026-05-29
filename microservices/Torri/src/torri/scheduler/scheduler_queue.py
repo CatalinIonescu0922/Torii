@@ -7,16 +7,14 @@ import threading
 import queue
 import yaml
 import os
-import re 
 from typing import Optional, Dict, List
 
 from shared.logger_setup import get_logger
 from shared.gerritmodel import GerritTriggerEvent
 from torri.scheduler.redis_client import TorriRedis
-from torri.scheduler.pipeline_config import PipelineConfigLoader, PipelineConfig
+from torri.scheduler.pipeline_config import PipelineConfigLoader
 from torri.scheduler.pipeline_manager import (
     BasePipelineManager, IndependentPipeline, DependentPipeline,
-    ChangeInfoModel, ChangeState
 )
 from torri.scheduler.status_writer import refresh_status
 from torri.scheduler.merger_client import request_merge
@@ -33,6 +31,7 @@ class SchedulerQueue(threading.Thread):
         yaml_dir: str,
         redis_url: Optional[str] = None,
         kafka_bootstrap: str = "kafka:9092",
+        drivers: Optional[Dict] = None,
     ):
         super().__init__(daemon=True, name="SchedulerQueue")
         self.logger = get_logger("torri.scheduler.queue")
@@ -42,10 +41,10 @@ class SchedulerQueue(threading.Thread):
         self.yaml_dir = yaml_dir
         self.redis = TorriRedis(redis_url)
         self.kafka_bootstrap = kafka_bootstrap
+        self.drivers = drivers or {}
         self.event_queue: queue.Queue = queue.Queue()
         self.running = False
         self.pipelines: Dict[str, BasePipelineManager] = {}
-        self.pipeline_configs: Dict[str, PipelineConfig] = {}
         self.project_pipelines: Dict[str, List[str]] = {}
         self.project_pipeline_jobs: Dict[tuple, List[str]] = {}
         # job_name → job config dict (nodeset, timeout, run, pre-run, post-run)
@@ -90,14 +89,23 @@ class SchedulerQueue(threading.Thread):
         """Load pipeline/project/job/nodeset configs from YAML files."""
         try:
             pipelines_path = os.path.join(self.yaml_dir, 'pipelines.yaml')
-            loader = PipelineConfigLoader(pipelines_path)
-            self.pipeline_configs = loader.get_all_pipelines()
+            loader = PipelineConfigLoader(pipelines_path, self.drivers)
+            all_configs = loader.get_all_pipelines()
 
-            for name, pipeline_config in self.pipeline_configs.items():
+            for name, pipeline_config in all_configs.items():
                 if pipeline_config.manager == 'dependent':
-                    self.pipelines[name] = DependentPipeline(name, self.redis, source=self.source, gerrit_conn=self.gerrit_conn)
+                    self.pipelines[name] = DependentPipeline(
+                        name, self.redis,
+                        config=pipeline_config,
+                        source=self.source,
+                        gerrit_conn=self.gerrit_conn,
+                    )
                 else:
-                    self.pipelines[name] = IndependentPipeline(name, self.redis, source=self.source)
+                    self.pipelines[name] = IndependentPipeline(
+                        name, self.redis,
+                        config=pipeline_config,
+                        source=self.source,
+                    )
                 self.logger.info("Initialized pipeline %s (manager=%s)", name, pipeline_config.manager)
 
             projects_path = os.path.join(self.yaml_dir, 'projects.yaml')
@@ -109,7 +117,7 @@ class SchedulerQueue(threading.Thread):
                 project_name = project.get('name')
                 if not project_name:
                     continue
-                pipelines_for_project = [p for p in self.pipeline_configs if p in project]
+                pipelines_for_project = [p for p in self.pipelines if p in project]
                 self.project_pipelines[project_name] = pipelines_for_project
                 for pipeline_name in pipelines_for_project:
                     jobs = project.get(pipeline_name, {}).get('jobs', [])
@@ -161,26 +169,17 @@ class SchedulerQueue(threading.Thread):
                 )
                 return
 
-            change_info = ChangeInfoModel(change_id, project_name, branch)
-            change_info.state = ChangeState.QUEUED
-
             for pipeline_name in pipeline_names:
                 pipeline = self.pipelines.get(pipeline_name)
-                pipeline_config = self.pipeline_configs.get(pipeline_name)
-                if not pipeline or not pipeline_config:
+                if not pipeline or not pipeline.config:
                     self.logger.warning("Pipeline %s not found", pipeline_name)
                     continue
 
-                # Skip silently when event type is not listed in this pipeline's triggers.
-                trigger_events = [
-                    t.get("event")
-                    for t in pipeline_config.trigger.get("gerrit", [])
-                    if isinstance(t, dict)
-                ]
-                if trigger_events and event.type not in trigger_events:
+                # Skip silently when no configured trigger filter accepts this event.
+                if not any(f.matches(event) for f in pipeline.config.triggers):
                     self.logger.debug(
-                        "Event type=%s does not match triggers %s for pipeline %s, skipping",
-                        event.type, trigger_events, pipeline_name,
+                        "Event type=%s does not match any trigger for pipeline %s, skipping",
+                        event.type, pipeline_name,
                     )
                     continue
                 # verify if the pipeline already runs this change 
@@ -192,7 +191,8 @@ class SchedulerQueue(threading.Thread):
                     )
                     continue
 
-                passed, rejection_reason = self._change_meets_requirements(event, pipeline_config)
+                change = self.source.getChange(event.change_number, event.patch_number)
+                passed, rejection_reason = pipeline.config.can_change_enter(change, event.patch_number)
                 if not passed:
                     reject_key = f"torri:rejected:{pipeline_name}:{change_id}:{event.patch_number}"
                     if self.redis.client.setnx(reject_key, rejection_reason):
@@ -210,24 +210,23 @@ class SchedulerQueue(threading.Thread):
                 else:
                     queue_pos = pipeline.enqueue_change(change_id)
 
-                pipeline.save_change_state(change_info)
                 self.logger.info(
                     "Enqueued change %s to pipeline %s at position %d",
                     change_id, pipeline_name, queue_pos,
                 )
 
                 # Tell Gerrit the pipeline has started — sent exactly once thanks to start_key guard above
-                if pipeline_config.start_message and event.patch_number:
+                if pipeline.config.start_message and event.patch_number:
                     self.gerrit_conn.set_review(
                         change_id, event.patch_number,
-                        message=pipeline_config.start_message,
+                        message=pipeline.config.start_message,
                     )
 
                 job_names = self.project_pipeline_jobs.get((project_name, pipeline_name), [])
-                refresh_status(self.redis, list(self.pipeline_configs.keys()))
+                refresh_status(self.redis, list(self.pipelines.keys()))
 
                 # Capture loop variables for the closures
-                captured_pipeline_config = pipeline_config
+                captured_pipeline_config = pipeline.config
                 captured_patchset = event.patch_number
                 captured_ref = event.ref  # patchset git ref e.g. refs/changes/01/1/1
                 captured_is_gate = isinstance(pipeline, DependentPipeline)
@@ -240,12 +239,9 @@ class SchedulerQueue(threading.Thread):
                     _pname=pipeline_name,
                     _is_gate=captured_is_gate,
                 ):
-                    labels = _pc.success_labels if status == "succeeded" else _pc.failure_labels
-                    message = _pc.success_message if status == "succeeded" else _pc.failure_message
-                    if _ps and labels:
-                        self.gerrit_conn.set_review(_cid, _ps, message=message, labels=labels)
-                    elif _ps:
-                        self.gerrit_conn.set_review(_cid, _ps, message=message)
+                    actions = _pc.success_actions if status == "succeeded" else _pc.failure_actions
+                    for action in actions:
+                        action.report(_cid, _ps)
                     if _is_gate and status == "succeeded":
                         self.logger.info("Gate pipeline succeeded for change %s — submitting to Gerrit", _cid)
                         self.gerrit_conn.submit_change(_cid)
@@ -261,7 +257,7 @@ class SchedulerQueue(threading.Thread):
                             "Patchset %s for change %s is superseded by patchset %s — skipping queue remove",
                             _ps, _cid, current_change.patchset,
                         )
-                    refresh_status(self.redis, list(self.pipeline_configs.keys()))
+                    refresh_status(self.redis, list(self.pipelines.keys()))
 
                 def on_merge_done(
                     synthetic_ref,

@@ -2,24 +2,28 @@ from torri.driver import Driver
 from torri.gerrit.gerritconnection import GerritRestConnection
 from torri.gerrit.gerritsource import GerritSource
 from torri.driver.gerrit.gerritreporter import GerritReporter
+from torri.trigger.gerrittrigger import GerritTrigger
+
 
 class GerritDriver(Driver):
     """
-    Glue driver for Gerrit.
+    Gerrit driver. Owns the connection, source, trigger, and reporter for Gerrit.
+
+    Pass existing connection/source when they were already constructed elsewhere
+    (e.g. cmd/scheduler.py), otherwise the driver creates its own.
     """
-    
-    def __init__(self, connection_config=None, redis=None):
-        self.connection_config = connection_config or {}
-        self.redis = redis
-        # Centralizing the instantiation here:
-        self.connection = GerritRestConnection(
-            self.connection_config.get('base_url'),
-            auth=self.connection_config.get('auth'),
-            redis=self.redis
-        )
-        # Source needs driver and connection
-        self.source = GerritSource(self.connection, self.redis, self)
-        # Reporter needs driver and connection
+
+    def __init__(self, connection=None, source=None, connection_config=None, redis=None):
+        connection_config = connection_config or {}
+        if connection is not None:
+            self.connection = connection
+        else:
+            self.connection = GerritRestConnection(
+                connection_config.get('base_url'),
+                auth=connection_config.get('auth'),
+                redis=redis,
+            )
+        self.source = source if source is not None else GerritSource(self.connection, redis, self)
         self.reporter = GerritReporter(self, self.connection)
 
     @property
@@ -33,8 +37,7 @@ class GerritDriver(Driver):
         return self.source
 
     def getTrigger(self):
-        # We can implement a formal trigger later, for now we just return None
-        return None
+        return GerritTrigger(self, self.connection)
 
     def getReporter(self):
         return self.reporter

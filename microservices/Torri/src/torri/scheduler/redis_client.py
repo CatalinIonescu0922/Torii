@@ -250,7 +250,6 @@ class TorriRedis:
 REDIS_KEYS = {
     'pipeline_queue': 'torri:pipeline:{pipeline_id}:queue',
     'pipeline_window': 'torri:pipeline:{pipeline_id}:window',
-    'change_state': 'torri:change:{change_id}:state',
     'buildset_state': 'torri:buildset:{buildset_id}:state',
     'job_state': 'torri:job:{job_id}:state',
     'job_logs': 'torri:job:{job_id}:logs',

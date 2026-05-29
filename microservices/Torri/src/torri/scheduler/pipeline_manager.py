@@ -16,15 +16,6 @@ from shared.logger_setup import get_logger
 from torri.scheduler.redis_client import TorriRedis, REDIS_KEYS
 from torri.scheduler.gate_algorithm import GateAlgorithm
 
-class ChangeState(str, Enum):
-    """States a change can be in."""
-    NEW = "new"
-    QUEUED = "queued"
-    PROCESSING = "processing"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    ABANDONED = "abandoned"
-
 
 class BuildSetStatus(str, Enum):
     """Status of a build attempt."""
@@ -43,31 +34,6 @@ class JobStatus(str, Enum):
     FAILURE = "failure"
     SKIPPED = "skipped"
     TIMEOUT = "timeout"
-
-
-class ChangeInfoModel:
-    """In-memory representation of a change being processed."""
-    
-    def __init__(self, change_id: str, project_name: str, branch: str):
-        self.change_id = change_id
-        self.project_name = project_name
-        self.branch = branch
-        self.state = ChangeState.NEW
-        self.buildsets: List[str] = []
-        self.queue_position = None
-        self.created_at = datetime.utcnow()
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for storage."""
-        return {
-            'change_id': self.change_id,
-            'project_name': self.project_name,
-            'branch': self.branch,
-            'state': self.state.value,
-            'buildsets': self.buildsets,
-            'queue_position': self.queue_position,
-            'created_at': self.created_at.isoformat(),
-        }
 
 
 class BuildSetModel:
@@ -104,10 +70,11 @@ class BasePipelineManager(ABC):
     Manages queues, windows, and change state.
     """
     
-    def __init__(self, pipeline_id: str, redis_client: TorriRedis, source=None):
+    def __init__(self, pipeline_id: str, redis_client: TorriRedis, config=None, source=None):
         self.logger = get_logger(f"torri.scheduler.pipeline.{pipeline_id}")
         self.pipeline_id = pipeline_id
         self.redis = redis_client
+        self.config = config
         self.source = source
         self.active_builds: Dict[str, BuildSetModel] = {}
     
@@ -277,36 +244,6 @@ class BasePipelineManager(ABC):
         except Exception as e:
             self.logger.error("Error updating buildset status: %s", e)
     
-    def save_change_state(self, change_info: ChangeInfoModel):
-        """Persist change state to Redis."""
-        try:
-            change_key = REDIS_KEYS['change_state'].format(change_id=change_info.change_id)
-            self.redis.set_state(change_key, change_info.to_dict())
-        except Exception as e:
-            self.logger.error("Error saving change state: %s", e)
-    
-    def get_change_state(self, change_id: str) -> Optional[ChangeInfoModel]:
-        """Retrieve change state from Redis."""
-        try:
-            change_key = REDIS_KEYS['change_state'].format(change_id=change_id)
-            change_data = self.redis.get_state(change_key)
-            if not change_data:
-                return None
-            
-            change_info = ChangeInfoModel(
-                change_data['change_id'],
-                change_data['project_name'],
-                change_data['branch']
-            )
-            change_info.state = ChangeState[change_data['state'].upper()]
-            change_info.buildsets = change_data.get('buildsets', [])
-            change_info.queue_position = change_data.get('queue_position')
-            return change_info
-        except Exception as e:
-            self.logger.error("Error getting change state: %s", e)
-            return None
-
-
 class IndependentPipeline(BasePipelineManager):
     """
     Independent pipeline: each change is tested on its own, no merge.
@@ -334,8 +271,8 @@ class DependentPipeline(BasePipelineManager):
     - Cascade failure propagation
     """
     
-    def __init__(self, pipeline_id: str, redis_client: TorriRedis, source=None, gerrit_conn=None):
-        super().__init__(pipeline_id, redis_client, source=source)
+    def __init__(self, pipeline_id: str, redis_client: TorriRedis, config=None, source=None, gerrit_conn=None):
+        super().__init__(pipeline_id, redis_client, config=config, source=source)
         self.gerrit_conn = gerrit_conn
         if gerrit_conn:
             self.gate_algorithm = GateAlgorithm(redis_client, gerrit_conn)
