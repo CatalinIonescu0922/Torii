@@ -271,11 +271,10 @@ class DependentPipeline(BasePipelineManager):
     - Cascade failure propagation
     """
     
-    def __init__(self, pipeline_id: str, redis_client: TorriRedis, config=None, source=None, gerrit_conn=None):
+    def __init__(self, pipeline_id: str, redis_client: TorriRedis, config=None, source=None):
         super().__init__(pipeline_id, redis_client, config=config, source=source)
-        self.gerrit_conn = gerrit_conn
-        if gerrit_conn:
-            self.gate_algorithm = GateAlgorithm(redis_client, gerrit_conn)
+        if source:
+            self.gate_algorithm = GateAlgorithm(redis_client, source)
         else:
             self.gate_algorithm = None
     
@@ -386,11 +385,11 @@ class DependentPipeline(BasePipelineManager):
             return False
 
 
-def create_pipeline(pipeline_type: str, pipeline_id: str, redis_client: TorriRedis, gerrit_conn=None) -> BasePipelineManager:
+def create_pipeline(pipeline_type: str, pipeline_id: str, redis_client: TorriRedis, source=None) -> BasePipelineManager:
     """Factory to create pipeline based on the manager field from pipelines.yaml."""
     if pipeline_type.lower() == "independent":
         return IndependentPipeline(pipeline_id, redis_client)
     elif pipeline_type.lower() == "dependent":
-        return DependentPipeline(pipeline_id, redis_client, gerrit_conn)
+        return DependentPipeline(pipeline_id, redis_client, source=source)
     else:
         raise ValueError(f"Unknown pipeline manager type: {pipeline_type}")

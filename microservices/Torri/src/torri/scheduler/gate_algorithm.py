@@ -23,15 +23,15 @@ class GateAlgorithm:
     Core gate pipeline algorithm for ordered, dependent change processing.
     """
     
-    def __init__(self, redis_client: TorriRedis, gerrit_conn, merger_coordinator=None):
+    def __init__(self, redis_client: TorriRedis, source, merger_coordinator=None):
         self.logger = get_logger("torri.scheduler.gate_algorithm")
         self.redis = redis_client
-        self.gerrit_conn = gerrit_conn
+        self.source = source
         self.merger_coordinator = merger_coordinator
         
         self.dependencies = DependencyManager(redis_client)
         self.merge_coordinator = MergeCoordinator(redis_client)
-        self.speculative_merger = SpeculativeMerger(redis_client, gerrit_conn)
+        self.speculative_merger = SpeculativeMerger(redis_client, source)
     
     # ========== Phase 1: Queuing ==========
     
@@ -369,10 +369,9 @@ class GateAlgorithm:
         try:
             change_number = gerrit_change.get('_number') or gerrit_change.get('number') or change_id
             
-            self.logger.info("Submitting change %s to Gerrit", change_id)
+            self.logger.info("Submitting change %s", change_id)
             
-            # Call Gerrit REST API - no strategy specified, uses repo default
-            success, response = self.gerrit_conn.submit_change(str(change_number))
+            success, response = self.source.submitChange(str(change_number))
             
             if success:
                 status = response.get('status')

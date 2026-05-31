@@ -21,10 +21,10 @@ class SpeculativeMerger:
     without actually merging them yet.
     """
     
-    def __init__(self, redis_client: TorriRedis, gerrit_conn):
+    def __init__(self, redis_client: TorriRedis, source):
         self.logger = get_logger("torri.scheduler.speculative_merger")
         self.redis = redis_client
-        self.gerrit_conn = gerrit_conn
+        self.source = source
     
     def calculate_merge_base(
         self,
@@ -187,7 +187,7 @@ class SpeculativeMerger:
         try:
             # This would call git API or Gerrit API
             # For now, return placeholder
-            return self.gerrit_conn.getRefHeadCommit(f"refs/heads/{branch}")
+            return self.source.getRefSha(None, f"refs/heads/{branch}")
         except Exception as e:
             self.logger.error("Error getting branch head: %s", e)
             raise

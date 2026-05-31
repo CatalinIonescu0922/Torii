@@ -26,7 +26,6 @@ class SchedulerQueue(threading.Thread):
 
     def __init__(
         self,
-        gerrit_conn,
         source,
         yaml_dir: str,
         redis_url: Optional[str] = None,
@@ -36,7 +35,6 @@ class SchedulerQueue(threading.Thread):
         super().__init__(daemon=True, name="SchedulerQueue")
         self.logger = get_logger("torri.scheduler.queue")
 
-        self.gerrit_conn = gerrit_conn
         self.source = source
         self.yaml_dir = yaml_dir
         self.redis = TorriRedis(redis_url)
@@ -98,7 +96,6 @@ class SchedulerQueue(threading.Thread):
                         name, self.redis,
                         config=pipeline_config,
                         source=self.source,
-                        gerrit_conn=self.gerrit_conn,
                     )
                 else:
                     self.pipelines[name] = IndependentPipeline(
@@ -186,8 +183,8 @@ class SchedulerQueue(threading.Thread):
                 if pipeline.is_change_in_pipeline(change_id):
                     message = f"change {event.change_number} is already running in pipeline {pipeline.pipeline_id}"
                     self.logger.debug(message)
-                    self.gerrit_conn.set_review(
-                        change_id, event.patch_number , message
+                    self.source.postReview(
+                        change_id, event.patch_number, message
                     )
                     continue
 
@@ -198,7 +195,7 @@ class SchedulerQueue(threading.Thread):
                     if self.redis.client.setnx(reject_key, rejection_reason):
                         self.redis.client.expire(reject_key, 86400)
                         if event.patch_number:
-                            self.gerrit_conn.set_review(
+                            self.source.postReview(
                                 change_id, event.patch_number,
                                 message=f"[Torii] Not entering {pipeline_name}: {rejection_reason}",
                             )
@@ -215,9 +212,9 @@ class SchedulerQueue(threading.Thread):
                     change_id, pipeline_name, queue_pos,
                 )
 
-                # Tell Gerrit the pipeline has started — sent exactly once thanks to start_key guard above
+                # Tell the SCM the pipeline has started
                 if pipeline.config.start_message and event.patch_number:
-                    self.gerrit_conn.set_review(
+                    self.source.postReview(
                         change_id, event.patch_number,
                         message=pipeline.config.start_message,
                     )
@@ -243,8 +240,8 @@ class SchedulerQueue(threading.Thread):
                     for action in actions:
                         action.report(_cid, _ps)
                     if _is_gate and status == "succeeded":
-                        self.logger.info("Gate pipeline succeeded for change %s — submitting to Gerrit", _cid)
-                        self.gerrit_conn.submit_change(_cid)
+                        self.logger.info("Gate pipeline succeeded for change %s — submitting", _cid)
+                        self.source.submitChange(_cid)
                     # Only remove this change from the queue when the patchset that
                     # started this run is still the one finishing it.  If a new
                     # patchset arrived while we were running, its own on_done handles
@@ -314,7 +311,7 @@ class SchedulerQueue(threading.Thread):
                 merge_job_id = f"{pipeline_name}:{change_id}:{event.patch_number}"
                 request_merge(
                     job_id=merge_job_id,
-                    project=f"{self.gerrit_conn.base_url}/{project_name}",
+                    project=self.source.getGitUrl(project_name),
                     branch=branch,
                     patchset_refs=[captured_ref],
                     on_done=on_merge_done,

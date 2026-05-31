@@ -29,9 +29,18 @@ class GerritSource(BaseSource):
         return None
 
     def getRefSha(self, project, ref):
-        pass
+        return self.connection.getRefHeadCommit(ref)
 
     def isMerged(self, change, head=None):
         if change.status == 'MERGED':
             return True
         return False
+
+    def postReview(self, change_id, patchset, message, labels=None):
+        return self.connection.set_review(change_id, patchset, message, labels)
+
+    def submitChange(self, change_id):
+        return self.connection.submit_change(change_id)
+
+    def getGitUrl(self, project_name):
+        return f"{self.connection.base_url}/{project_name}"

@@ -73,7 +73,6 @@ def main():
 
     kafka_bootstrap = config.kafka_bootstrap_servers
     scheduler_queue = SchedulerQueue(
-        gerrit_conn,
         source,
         yaml_dir=yaml_dir,
         redis_url=config.redis_url,

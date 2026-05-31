@@ -23,3 +23,15 @@ class BaseSource(SourceInterface):
     @abstractmethod
     def isMerged(self, change, head=None):
         pass
+
+    @abstractmethod
+    def postReview(self, change_id, patchset, message, labels=None):
+        pass
+
+    @abstractmethod
+    def submitChange(self, change_id):
+        pass
+
+    @abstractmethod
+    def getGitUrl(self, project_name):
+        pass

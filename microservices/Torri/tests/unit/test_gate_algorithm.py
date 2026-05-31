@@ -267,11 +267,11 @@ class TestSpeculativeMerger(unittest.TestCase):
     
     def setUp(self):
         self.redis = MockRedis()
-        self.gerrit_conn = Mock()
-        self.merger = SpeculativeMerger(self.redis, self.gerrit_conn)
+        self.source = Mock()
+        self.merger = SpeculativeMerger(self.redis, self.source)
         
         # Mock git operations
-        self.gerrit_conn.getRefHeadCommit = Mock(return_value="main_abc123")
+        self.source.getRefSha = Mock(return_value="main_abc123")
     
     def test_calculate_merge_base_position_zero(self):
         """Test merge base for first change in queue (position 0)."""
@@ -344,11 +344,11 @@ class TestGateAlgorithm(unittest.TestCase):
     
     def setUp(self):
         self.redis = MockRedis()
-        self.gerrit_conn = Mock()
-        self.algorithm = GateAlgorithm(self.redis, self.gerrit_conn)
+        self.source = Mock()
+        self.algorithm = GateAlgorithm(self.redis, self.source)
         
         # Mock git operations
-        self.gerrit_conn.getRefHeadCommit = Mock(return_value="main_abc123")
+        self.source.getRefSha = Mock(return_value="main_abc123")
     
     def test_enqueue_change(self):
         """Test enqueueing a change."""
@@ -487,9 +487,9 @@ class TestGateAlgorithmIntegration(unittest.TestCase):
     
     def setUp(self):
         self.redis = MockRedis()
-        self.gerrit_conn = Mock()
-        self.algorithm = GateAlgorithm(self.redis, self.gerrit_conn)
-        self.gerrit_conn.getRefHeadCommit = Mock(return_value="main_abc123")
+        self.source = Mock()
+        self.algorithm = GateAlgorithm(self.redis, self.source)
+        self.source.getRefSha = Mock(return_value="main_abc123")
     
     def test_complete_flow_single_change(self):
         """Test complete flow for a single change."""
