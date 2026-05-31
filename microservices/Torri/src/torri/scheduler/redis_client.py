@@ -30,7 +30,7 @@ class TorriRedis:
         if url not in self._pools:
             self._pools[url] = redis.ConnectionPool.from_url(url, decode_responses=True)
         if url not in self._binary_pools:
-            self._binary_pools[url] = redis.ConnectionPool.from_url(url, decode_responses=False)
+            self._binary_pools[url] = redis.ConnectionPool.from_url(url, decode_responses=False )
             
         self.client = redis.Redis(connection_pool=self._pools[url])
         # Separate client for binary (pickle) data — decode_responses must be False

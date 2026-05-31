@@ -9,11 +9,3 @@ class BaseConnection(ConnectionInterface):
         self.driver = driver
         self.connection_name = connection_name
         self.connection_config = connection_config
-
-    @abstractmethod
-    def connect(self):
-        pass
-        
-    @abstractmethod
-    def stop(self):
-        pass

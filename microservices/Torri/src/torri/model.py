@@ -11,13 +11,3 @@ class BaseEventFilter(ABC):
     def matches(self, event) -> bool:
         pass
 
-
-class BaseReporterAction(ABC):
-    """
-    Represents one reporting task: post a comment, leave a vote, etc.
-    All the data needed to execute the action is baked in at construction time.
-    """
-
-    @abstractmethod
-    def report(self, change_id: str, patchset: str) -> None:
-        pass
