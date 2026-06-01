@@ -213,12 +213,9 @@ class SchedulerQueue(threading.Thread):
                 )
 
                 # Tell the SCM the pipeline has started
-                if pipeline.config.start_message and event.patch_number:
-                    self.source.postReview(
-                        change_id, event.patch_number,
-                        message=pipeline.config.start_message,
-                    )
-
+                if pipeline.config.start_actions and event.patch_number:
+                    for actions in pipeline.config.start_actions:
+                        actions.report(event.change_number , event.patch_number)
                 job_names = self.project_pipeline_jobs.get((project_name, pipeline_name), [])
                 refresh_status(self.redis, list(self.pipelines.keys()))
 

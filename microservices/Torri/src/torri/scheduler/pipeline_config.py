@@ -26,6 +26,7 @@ class PipelineConfig:
         self,
         config_dict: dict,
         triggers: List[BaseEventFilter],
+        start_actions: List[BaseReporterAction],
         success_actions: List[BaseReporterAction],
         failure_actions: List[BaseReporterAction],
     ):
@@ -46,6 +47,7 @@ class PipelineConfig:
 
         # Driver-backed polymorphic objects
         self.triggers = triggers
+        self.start_actions = start_actions
         self.success_actions = success_actions
         self.failure_actions = failure_actions
 
@@ -163,14 +165,16 @@ class PipelineConfigLoader:
                     continue
 
                 pipeline_name = raw.get('name', '<unknown>')
+                start_message = raw.get('start-message', f'[Torii] {pipeline_name} pipeline started')
                 success_message = raw.get('success-message', f'[Torii] {pipeline_name} pipeline succeeded')
                 failure_message = raw.get('failure-message', f'[Torii] {pipeline_name} pipeline failed')
 
                 triggers = self._build_triggers(raw.get('trigger', {}))
+                start_actions = self._build_reporter_actions(raw.get('start', {}), start_message)
                 success_actions = self._build_reporter_actions(raw.get('success', {}), success_message)
                 failure_actions = self._build_reporter_actions(raw.get('failure', {}), failure_message)
 
-                config = PipelineConfig(raw, triggers, success_actions, failure_actions)
+                config = PipelineConfig(raw, triggers, start_actions, success_actions, failure_actions)
                 self.pipelines[config.name] = config
                 self.logger.info("Loaded pipeline: %s (manager=%s)", config.name, config.manager)
 
