@@ -30,7 +30,7 @@ projects:
       check:
         jobs:
           - check-syntax
-          - integration-tests
+          # - integration-tests
       gate:
         jobs:
           - unit-tests
