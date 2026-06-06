@@ -141,7 +141,7 @@ def dispatch(
     return buildset_uuid
 
 
-def on_job_result(job_uuid: str, buildset_uuid: str, job_name: str,status : str) -> None:
+def on_job_result(redis: TorriRedis, job_uuid: str, buildset_uuid: str, job_name: str, status: str) -> None:
     """
     Called by result_consumer when a single job finishes.
 
@@ -149,12 +149,40 @@ def on_job_result(job_uuid: str, buildset_uuid: str, job_name: str,status : str)
     """
     with _pending_lock:
         entry = _pending.get(buildset_uuid)
+        
         if entry is None:
-            logger.warning("Received result for unknown buildset=%s job=%s", buildset_uuid, job_uuid)
+            logger.warning("Received result for disconnected buildset=%s job=%s, updating Redis fallback", buildset_uuid, job_uuid)
+            redis_key = f"{BUILDSET_KEY_PREFIX}{buildset_uuid}"
+            bs_dict = redis.get_state(redis_key)
+            if not bs_dict:
+                logger.error("Buildset %s not found in redis either!", buildset_uuid)
+                return
+
+            done_count = 0
+            failed = False
+            for j in bs_dict.get("jobs", []):
+                if j.get("job_uuid") == job_uuid:
+                    j["status"] = status
+                
+                j_status = j.get("status")
+                if j_status in ("success", "failure", "succeeded", "failed"):
+                    done_count += 1
+                if j_status == "failure" or j_status == "failed":
+                    failed = True
+            
+            all_done = done_count == len(bs_dict.get("jobs", []))
+            if all_done:
+                bs_dict["status"] = "failed" if failed else "succeeded"
+                # If fully disconnected, at least remove it from the queue so the UI drops it
+                pipeline = bs_dict.get("pipeline")
+                change_id = bs_dict.get("change_id")
+                redis.queue_remove(f"torri:pipeline:{pipeline}:queue", change_id)
+                
+            redis.set_state(redis_key, bs_dict)
             return
 
         buildset: Buildset = entry["buildset"]
-        redis: TorriRedis = entry["redis"]
+        # "redis" argument was passed in, but we can assert or use the one from entry if we want.
 
         for job in buildset.jobs:
             if job.job_uuid == job_uuid:
