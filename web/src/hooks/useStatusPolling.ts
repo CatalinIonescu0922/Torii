@@ -4,10 +4,8 @@ import type { StatusResponse } from '../types/status';
 export function useStatusPolling(pollIntervalMs: number = 5000) {
   const [data, setData] = useState<StatusResponse | null>(null);
   const [error, setError] = useState<Error | null>(null);
-  const [isPolling, setIsPolling] = useState<boolean>(true);
 
   const fetchStatus = useCallback(async () => {
-    if (!isPolling) return;
     try {
       // In production, this points to your FastAPI/Python backend
       const res = await fetch('/api/status');
@@ -19,7 +17,7 @@ export function useStatusPolling(pollIntervalMs: number = 5000) {
       setError(err instanceof Error ? err : new Error('Unknown error'));
       // Optional: you can auto-pause polling here if there's a hard crash
     }
-  }, [isPolling]);
+  }, []);
 
   useEffect(() => {
     // Initial fetch
@@ -33,8 +31,6 @@ export function useStatusPolling(pollIntervalMs: number = 5000) {
 
   return { 
     data, 
-    error, 
-    isPolling, 
-    togglePolling: () => setIsPolling(p => !p) 
+    error
   };
 }

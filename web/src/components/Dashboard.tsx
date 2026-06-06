@@ -9,7 +9,7 @@ interface SelectedJob {
 }
 
 export function Dashboard() {
-  const { data, error, isPolling, togglePolling } = useStatusPolling(10000);
+  const { data, error } = useStatusPolling(10000);
   console.log("the data is: ", data)
   const [selectedJob, setSelectedJob] = useState<SelectedJob | null>(null);
 
@@ -32,14 +32,6 @@ export function Dashboard() {
             Last Updated: {new Date(data.last_updated).toLocaleTimeString()}
           </p>
         </div>
-        <button
-          onClick={togglePolling}
-          className={`px-4 py-2 rounded font-medium shadow-sm transition ${
-            isPolling ? 'bg-red-50 text-red-600 hover:bg-red-100' : 'bg-green-50 text-green-600 hover:bg-green-100'
-          }`}
-        >
-          {isPolling ? 'Pause Auto-Refresh' : 'Resume Auto-Refresh'}
-        </button>
       </header>
 
       {/* Pipelines Area */}
