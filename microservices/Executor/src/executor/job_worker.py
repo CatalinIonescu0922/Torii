@@ -161,35 +161,27 @@ class JobWorker:
         self.log.write("Fetch complete")
 
     def _inject_playbooks(self) -> None:
-        """Copy project-specific playbooks from image into cloned project."""
-        # The playbooks are stored in /app/project-playbooks/{project_shortname}/playbooks/
-        # We need to copy the playbooks/ subdirectory to {job_dir}/src/playbooks/
-        project_shortname = self.project.split('/')[-1]
-        source_playbooks = f"/app/project-playbooks/{project_shortname}/playbooks"
-        dest_playbooks = os.path.join(self.job_dir, "src", "playbooks")
+        """Copy job-specific playbooks from image into cloned project."""
+        # Jobs are stored in /app/jobs/{job_name}/ in the image.
+        # We copy the entire job directory to {job_dir}/src/playbooks/{job_name}/
+        # so that job_config.run paths like "playbooks/check-syntax/run.yaml" resolve correctly.
+        source_job = f"/app/jobs/{self.job_name}"
+        dest_playbooks = os.path.join(self.job_dir, "src", "playbooks", self.job_name)
         
-        logger.info("[INJECT] Attempting to inject playbooks: source=%s dest=%s", source_playbooks, dest_playbooks)
+        logger.info("[INJECT] Attempting to inject playbooks for job=%s: source=%s dest=%s", self.job_name, source_job, dest_playbooks)
         
-        if os.path.isdir(source_playbooks):
+        if os.path.isdir(source_job):
             try:
-                logger.info("[INJECT] Source directory exists, copying playbooks...")
-                # Copy individual files/dirs from source to dest
-                for item in os.listdir(source_playbooks):
-                    src_item = os.path.join(source_playbooks, item)
-                    dst_item = os.path.join(dest_playbooks, item)
-                    logger.debug("[INJECT] Copying %s to %s", src_item, dst_item)
-                    if os.path.isdir(src_item):
-                        shutil.copytree(src_item, dst_item, dirs_exist_ok=True)
-                    else:
-                        shutil.copy2(src_item, dst_item)
-                logger.info("[INJECT] Successfully injected playbooks from %s", source_playbooks)
-                self.log.write(f"Injected playbooks from {source_playbooks}")
+                logger.info("[INJECT] Source job directory exists, copying playbooks...")
+                shutil.copytree(source_job, dest_playbooks, dirs_exist_ok=True)
+                logger.info("[INJECT] Successfully injected playbooks for job %s from %s", self.job_name, source_job)
+                self.log.write(f"Injected playbooks for job {self.job_name} from {source_job}")
             except Exception as e:
-                logger.error("[INJECT] Failed to inject playbooks: %s", e, exc_info=True)
+                logger.error("[INJECT] Failed to inject playbooks for job %s: %s", self.job_name, e, exc_info=True)
                 self.log.write(f"WARNING: Failed to inject playbooks: {e}")
         else:
-            logger.warning("[INJECT] Source playbooks directory NOT FOUND: %s", source_playbooks)
-            self.log.write(f"WARNING: No playbooks found at {source_playbooks}")
+            logger.warning("[INJECT] Source job directory NOT FOUND: %s", source_job)
+            self.log.write(f"WARNING: No playbooks found for job {self.job_name} at {source_job}")
 
     def _make_runner(self) -> BaseRunner:
         nodes = self.nodeset_config.get("nodes", [])

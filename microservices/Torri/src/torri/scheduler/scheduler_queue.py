@@ -222,7 +222,7 @@ class SchedulerQueue(threading.Thread):
                 # Capture loop variables for the closures
                 captured_pipeline_config = pipeline.config
                 captured_patchset = event.patch_number
-                captured_ref = event.ref  # patchset git ref e.g. refs/changes/01/1/1
+                captured_ref = event.ref  # TODO create a function that create the ref based on the dependencies 
                 captured_is_gate = isinstance(pipeline, DependentPipeline)
 
                 def on_done(

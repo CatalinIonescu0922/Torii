@@ -111,7 +111,7 @@ RUN chmod 700 /root/.ssh && chmod 600 /root/.ssh/Torri_ed25519
 
 # Copy project-specific playbooks into the image
 # These will be injected into cloned repos by the job_worker
-COPY --link compose/files/projects/ /app/project-playbooks/
+COPY --link compose/files/jobs/ /app/jobs/
 
 # Create executor working directories
 RUN mkdir -p /var/torii/jobs /etc/torri /app/logs

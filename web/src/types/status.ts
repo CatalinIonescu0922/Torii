@@ -25,3 +25,15 @@ export interface StatusResponse {
   last_updated: string;
   pipelines: Pipeline[];
 }
+
+export interface Buildset {
+  buildset_uuid: string;
+  change_id: string;
+  patchset: string;
+  pipeline: string;
+  project: string;
+  branch: string;
+  status: 'running' | 'succeeded' | 'failed';
+  created_at: string;
+  jobs: Job[];
+}

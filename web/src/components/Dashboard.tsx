@@ -22,17 +22,17 @@ export function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-8 font-sans" style={selectedJob ? { paddingBottom: '42vh' } : {}}>
+    <div className="font-sans" style={selectedJob ? { paddingBottom: '42vh' } : {}}>
 
       {/* Header */}
-      <header className="flex justify-between items-center mb-8 border-b pb-4">
+      <div className="flex justify-between items-center mb-8 border-b pb-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-800">Torri Status</h1>
           <p className="text-sm text-gray-500">
             Last Updated: {new Date(data.last_updated).toLocaleTimeString()}
           </p>
         </div>
-      </header>
+      </div>
 
       {/* Pipelines Area */}
       <div className="grid gap-8 grid-cols-1 xl:grid-cols-2">

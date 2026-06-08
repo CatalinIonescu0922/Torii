@@ -20,13 +20,13 @@ export function useStatusPolling(pollIntervalMs: number = 5000) {
   }, []);
 
   useEffect(() => {
-    // Initial fetch
     fetchStatus();
 
-    // Setup polling interval
     const intervalId = setInterval(fetchStatus, pollIntervalMs);
 
-    return () => clearInterval(intervalId); // Cleanup on unmount
+    return () => {
+      clearInterval(intervalId);
+    };
   }, [fetchStatus, pollIntervalMs]);
 
   return { 

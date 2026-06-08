@@ -66,6 +66,59 @@ def get_buildset(buildset_uuid: str):
         return {"error": "internal error"}, 500
 
 
+@app.get("/api/buildsets")
+def get_buildsets(pipeline: str = None, project: str = None, status: str = None, limit: int = 100):
+    """
+    Fetch all buildsets, sort descending by created_at.
+    Allows filtering by pipeline, project, and status.
+    """
+    try:
+        keys = list(_redis.scan_iter(match=f"{BUILDSET_KEY_PREFIX}*"))
+        if not keys:
+            return []
+
+        raw_buildsets = _redis.mget(keys)
+        buildsets = []
+        for raw in raw_buildsets:
+            if not raw:
+                continue
+            buildsets.append(json.loads(raw))
+
+        buildsets.sort(key=lambda item: item.get("created_at", ""), reverse=True)
+
+        filtered = []
+        for bs in buildsets:
+            if pipeline and bs.get("pipeline") != pipeline:
+                continue
+            if project and bs.get("project") != project:
+                continue
+            if status and bs.get("status") != status:
+                continue
+
+            filtered.append(bs)
+            if len(filtered) >= limit:
+                break
+
+        return filtered
+    except Exception as e:
+        logger.error("Failed to fetch buildsets: %s", e)
+        return {"error": "internal error"}, 500
+
+
+@app.get("/api/job/{job_uuid}/logs")
+def get_job_logs(job_uuid: str):
+    """Fetch all log lines for a completed job from Redis."""
+    try:
+        key = f"{LOG_KEY_PREFIX}{job_uuid}"
+        lines = _redis.lrange(key, 0, -1)
+        if not lines:
+            return {"error": "not found"}, 404
+        return {"lines": lines}
+    except Exception as e:
+        logger.error("Failed to fetch job logs: %s", e)
+        return {"error": "internal error"}, 500
+
+
 @app.websocket("/ws/job/{job_uuid}/logs")
 async def job_logs(websocket: WebSocket, job_uuid: str):
     """
