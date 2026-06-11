@@ -20,6 +20,8 @@ import os
 import shutil
 import subprocess
 import threading
+import time
+from datetime import datetime, timezone
 
 import redis as redis_lib
 
@@ -58,8 +60,13 @@ class JobWorker:
         self.log = LogRelay(self.job_uuid, config.redis_url)
 
         self._node_pool: NodePool | None = None
+        self.started_at: datetime | None = None
+        self.started_monotonic: float | None = None
 
     def run(self) -> None:
+        self.started_at = datetime.now(timezone.utc)
+        self.started_monotonic = time.perf_counter()
+        self._publish_result("running")
         try:
             if (self._execute()):
                 self._publish_result("success")
@@ -102,7 +109,6 @@ class JobWorker:
             self._write_inventory(runner)
             self._write_ansible_cfg(runner)
             logger.info("[JOB] Inventory and config written, starting playbooks")
-            self._publish_result("running")
             success = self._run_playbooks()
             logger.info("[JOB] Playbooks completed with success=%s", success)
             return success
@@ -323,17 +329,29 @@ class JobWorker:
             logger.warning("Could not clean up job dir %s: %s", self.job_dir, e)
 
     def _publish_result(self, status: str) -> None:
-        self.log.write(f"Job finished: {status}")
+        if status == "running":
+            self.log.write("Job started")
+        else:
+            self.log.write(f"Job finished: {status}")
         logger.info("Job %s finished: %s", self.job_uuid, status)
 
         try:
             producer = Producer({"bootstrap.servers": self.config.kafka_bootstrap})
-            result_payload = json.dumps({
+            result = {
                 "job_uuid": self.job_uuid,
                 "buildset_uuid": self.buildset_uuid,
                 "job_name": self.job_name,
                 "status": status,
-            })
+            }
+            if self.started_at:
+                result["start_time"] = self.started_at.isoformat()
+            if status != "running":
+                end_time = datetime.now(timezone.utc)
+                result["end_time"] = end_time.isoformat()
+                if self.started_monotonic is not None:
+                    result["duration_seconds"] = round(time.perf_counter() - self.started_monotonic, 3)
+
+            result_payload = json.dumps(result)
             producer.produce(
                 JOB_RESULTS_TOPIC,
                 key=self.job_uuid.encode(),
