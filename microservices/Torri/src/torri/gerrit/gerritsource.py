@@ -4,6 +4,7 @@ from shared.logger_setup import get_logger
 class GerritSource(BaseSource):
     """
     Separation layer between the scheduler and the Gerrit connection.
+    So we dont share the connection right away
     """
     name = "gerrit"
 
