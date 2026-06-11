@@ -67,7 +67,8 @@ CMD ["supervisord", "-n", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
 # ==========================================
 FROM runtime-base AS merger
 
-RUN apt-get install -y --no-install-recommends openssh-server && \
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends openssh-server && \
     rm -rf /var/lib/apt/lists/* && \
     mkdir -p /var/run/sshd
 
