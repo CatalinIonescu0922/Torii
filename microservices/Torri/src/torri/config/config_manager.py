@@ -272,7 +272,7 @@ class ConfigurationManager:
     @property
     def web_root_url(self) -> str:
         """Web UI root URL."""
-        return self._get_value('web', 'root_url', 'http://localhost:8000')
+        return self._get_value('web', 'ui_root_url', None) or self._get_value('web', 'root_url', 'http://localhost:5173')
     
     # ============================================================
     # Logging Configuration

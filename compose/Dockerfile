@@ -57,9 +57,16 @@ RUN mkdir -p \
     /app/logs \
     /etc/supervisor/conf.d \
     /var/log/supervisor \
-    /var/run
+    /var/run && \
+    printf '%s\n' \
+        '[supervisord]' \
+        'nodaemon=true' \
+        '' \
+        '[include]' \
+        'files=/etc/supervisor/conf.d/*.conf' \
+        > /etc/supervisor/supervisord.conf
 
-CMD ["supervisord", "-n", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+CMD ["supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"]
 
 
 # ==========================================
