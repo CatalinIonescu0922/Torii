@@ -5,16 +5,12 @@ ARG UV_IMAGE=ghcr.io/astral-sh/uv:latest
 ARG DOCKER_CLI_IMAGE=docker:27-cli
 
 
-# ==========================================
 # Tool Sources
-# ==========================================
 FROM ${UV_IMAGE} AS uv-source
 FROM ${DOCKER_CLI_IMAGE} AS docker-cli-source
 
 
-# ==========================================
 # Common Python Builder
-# ==========================================
 FROM ${PYTHON_IMAGE} AS builder
 
 COPY --link --from=uv-source /uv /uvx /bin/
@@ -33,9 +29,7 @@ COPY microservices/Executor/ /build/Executor/
 RUN uv pip install --no-cache supervisor ./Shared ./Torri ./Executor
 
 
-# ==========================================
 # Shared Runtime Base
-# ==========================================
 FROM ${PYTHON_IMAGE} AS runtime-base
 
 ENV PATH="/opt/venv/bin:$PATH" \
@@ -69,9 +63,7 @@ RUN mkdir -p \
 CMD ["supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"]
 
 
-# ==========================================
 # Merger Service
-# ==========================================
 FROM runtime-base AS merger
 
 RUN apt-get update && \
@@ -95,9 +87,7 @@ RUN useradd -o -u 0 -g 0 -m -d /home/git -s /usr/bin/git-shell git && \
 EXPOSE 22
 
 
-# ==========================================
 # Scheduler Service
-# ==========================================
 FROM runtime-base AS scheduler
 
 COPY --link compose/files/supervisor/scheduler/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
@@ -105,9 +95,7 @@ COPY --link compose/files/supervisor/scheduler/status_api.conf /etc/supervisor/c
 COPY --link compose/files/torri/ /app/Torri/src/torri/config/layout/
 
 
-# ==========================================
 # Executor Service
-# ==========================================
 FROM runtime-base AS executor
 
 COPY --link --from=docker-cli-source /usr/local/bin/docker /usr/local/bin/docker
