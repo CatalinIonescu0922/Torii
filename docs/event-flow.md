@@ -22,10 +22,14 @@ Gerrit
                                       │           └─► Merger service
                                       │                 └─► Kafka (merger-responses)
                                       │                       └─► on_merge_done()
-                                      │                             └─► launch_jobs()  ── threads (one per job)
-                                      │                                   └─► on_done()
-                                      │                                         ├─► gerrit.set_review()
-                                      │                                         └─► refresh_status()
+                                      │                             └─► executor_dispatcher.dispatch()
+                                      │                                   └─► Kafka (job-requests)
+                                      │                                         └─► Executor JobWorker threads
+                                      │                                               └─► Kafka (job-results)
+                                      │                                                     └─► ResultConsumer
+                                      │                                                           └─► on_done(summary)
+                                      │                                                                 ├─► gerrit.set_review()
+                                      │                                                                 └─► refresh_status()
                                       └─► refresh_status()
                                               └─► Redis (torri:ui:status)
                                                     └─► StatusAPI GET /api/status
@@ -341,71 +345,124 @@ The Merger service (separate container) handles the actual git operations and wr
 
 **Callback:** `on_merge_done(synthetic_ref, error)` defined in `scheduler_queue.py`
 
-- **If error:** logs the failure, calls `on_done(False)` to mark the pipeline run as failed.
-- **If success:** calls `launch_jobs(change_id, pipeline_name, job_names, redis, on_done, synthetic_ref=synthetic_ref)`.
+- **If error:** logs the failure and calls `on_done("failed")` to mark the pipeline run as failed.
+- **If success:** calls `executor_dispatcher.dispatch(...)`, which creates the buildset and publishes one job request per configured job.
 
 ---
 
 ## Stage 8 — Job Execution
 
-**File:** `microservices/Torri/src/torri/scheduler/job_runner.py`  
-**Function:** `launch_jobs()`
+**Scheduler file:** `microservices/Torri/src/torri/scheduler/executor_dispatcher.py`  
+**Executor file:** `microservices/Executor/src/executor/job_worker.py`
 
-One thread is spawned per job. Each thread runs `_run_job()`.
+`executor_dispatcher.dispatch()` creates a `Buildset` and writes it to Redis under `torri:buildset:{buildset_uuid}`. Each job gets a `job_uuid`, initial `queued` status, and a History URL for its logs.
 
-**On job start**, initial state is written to Redis:
-```
-Key:   torri:job:{pipeline_name}:{change_id}:{job_name}
-Value: {
-  "job_id": "check:123:unit-tests:a1b2c3",
-  "job_name": "unit-tests",
+**Buildset state on dispatch:**
+```json
+{
+  "buildset_uuid": "a1b2c3",
   "change_id": "123",
-  "pipeline_name": "check",
+  "patchset": "1",
+  "pipeline": "check",
+  "project": "libraries/common-utils",
+  "branch": "main",
   "status": "running",
-  "start_time": "2026-05-16T14:32:00+00:00",
-  "synthetic_ref": "abc123..."
+  "created_at": "2026-06-11T14:32:00+00:00",
+  "summary": "",
+  "jobs": [
+    {
+      "job_uuid": "j1",
+      "job_name": "unit-tests",
+      "status": "queued",
+      "start_time": null,
+      "end_time": null,
+      "duration_seconds": null,
+      "log_url": "http://localhost:8000/buildsets?buildset=a1b2c3&job=j1"
+    }
+  ]
 }
 ```
 
-**Mock execution (current):** sleeps `JOB_DURATION_SECONDS` (50 seconds).
+For each job, the scheduler publishes a `job-requests` Kafka message with the job UUID, buildset UUID, project, branch, job config, nodeset config, and synthetic ref.
 
-**On job completion**, state is updated:
-```
-"status": "success",
-"end_time": "2026-05-16T14:32:50+00:00"
+The Executor consumes `job-requests`. One `JobWorker` thread runs each accepted job.
+
+**On job start**, the worker publishes a `running` result:
+```json
+{
+  "job_uuid": "j1",
+  "buildset_uuid": "a1b2c3",
+  "job_name": "unit-tests",
+  "status": "running",
+  "start_time": "2026-06-11T14:32:00+00:00"
+}
 ```
 
-A shared counter tracks remaining jobs. When all jobs finish, `on_done(succeeded)` is called.
+**During execution**, log lines are written to Redis under `torri:log:{job_uuid}`. The UI reads completed logs through `GET /api/job/{job_uuid}/logs` and streams live logs through `GET /ws/job/{job_uuid}/logs`.
+
+**On job completion**, the worker publishes a final result:
+```json
+{
+  "job_uuid": "j1",
+  "buildset_uuid": "a1b2c3",
+  "job_name": "unit-tests",
+  "status": "success",
+  "start_time": "2026-06-11T14:32:00+00:00",
+  "end_time": "2026-06-11T14:32:50+00:00",
+  "duration_seconds": 50.123
+}
+```
+
+`ResultConsumer` reads `job-results`, calls `executor_dispatcher.on_job_result()`, updates the buildset job state, and refreshes the UI status snapshot.
+
+When every job in the buildset reaches a terminal status, `executor_dispatcher` marks the buildset as `succeeded` or `failed`, generates a summary, and calls `on_done(status, summary)`.
+
+**Generated summary shape:**
+```text
+[Torii] check build finished for change 123, patchset 1: Success
+
+Jobs:
+- unit-tests: Success, 50.123s, logs: http://localhost:8000/buildsets?buildset=a1b2c3&job=j1
+```
 
 ---
 
 ## Stage 9 — Pipeline Completion Callback
 
-**Callback:** `on_done(succeeded)` defined in `scheduler_queue.py`
+**Callback:** `on_done(status, summary)` defined in `scheduler_queue.py`
 
-**1. Post Gerrit vote**
+**1. Post build summary**
+
+If a summary was generated, the scheduler posts it to Gerrit before pipeline reporter actions run.
 
 ```python
-labels = pipeline_config.success_labels if succeeded else pipeline_config.failure_labels
-gerrit_conn.set_review(change_id, patch_number, message=message, labels=labels)
+self.source.postReview(change_id, patchset, message=summary)
+```
+
+**2. Post Gerrit vote**
+
+```python
+actions = pipeline_config.success_actions if status == "succeeded" else pipeline_config.failure_actions
+for action in actions:
+    action.report(change_id, patchset)
 # Example: labels={"Verified": 1} on success, {"Verified": -1} on failure
 ```
 
-**2. Auto-submit if gate pipeline succeeded**
+**3. Auto-submit if gate pipeline succeeded**
 
 ```python
-if is_gate and succeeded:
+if is_gate and status == "succeeded":
     gerrit_conn.submit_change(change_id)
     # POST /a/changes/{change}/submit
 ```
 
-**3. Remove from pipeline queue**
+**4. Remove from pipeline queue**
 
 ```python
 redis.queue_remove(f"torri:pipeline:{pipeline_name}:queue", change_id)
 ```
 
-**4. Refresh UI status snapshot**
+**5. Refresh UI status snapshot**
 
 ```python
 refresh_status(redis, list(pipeline_configs.keys()))
@@ -418,13 +475,14 @@ refresh_status(redis, list(pipeline_configs.keys()))
 **File:** `microservices/Torri/src/torri/scheduler/status_writer.py`  
 **Function:** `refresh_status(redis, pipeline_names)`
 
-Called after every enqueue and after every pipeline completion.
+Called after every enqueue, after every job result, and after every pipeline completion.
 
 **Process for each pipeline:**
 1. Read all change IDs from `torri:pipeline:{pipeline_name}:queue`.
 2. For each change ID, load the cached `GerritChange` from Redis.
-3. Scan for job keys matching `torri:job:{pipeline_name}:{change_id}:*`.
-4. Assemble a snapshot dict.
+3. Resolve the active buildset through `torri:change:buildset:{change}:{patchset}:{pipeline}`.
+4. Read jobs from `torri:buildset:{buildset_uuid}`.
+5. Assemble a snapshot dict.
 
 **Writes to:**
 ```
@@ -448,14 +506,16 @@ Value: JSON (no TTL)
           "patchset": "2",
           "author": "John Doe",
           "url": "http://gerrit:8080/c/libraries/common-utils/+/123",
+          "buildset_uuid": "a1b2c3",
           "jobs": [
             {
-              "job_id": "check:123:unit-tests:abc123",
+              "job_uuid": "j1",
               "job_name": "unit-tests",
               "status": "success",
-              "start_time": "2026-05-16T14:32:00+00:00",
-              "end_time": "2026-05-16T14:32:50+00:00",
-              "url": null
+              "start_time": "2026-06-11T14:32:00+00:00",
+              "end_time": "2026-06-11T14:32:50+00:00",
+              "duration_seconds": 50.123,
+              "log_url": "http://localhost:8000/buildsets?buildset=a1b2c3&job=j1"
             }
           ]
         }
@@ -481,6 +541,8 @@ Reads `torri:ui:status` from Redis, returns it as JSON. If the key is missing, r
 
 The React dashboard (`web/src/hooks/useStatusPolling.ts`) polls this endpoint on a fixed interval and renders the result via `web/src/components/Dashboard.tsx`.
 
+The History tab reads buildsets through `GET /api/buildsets`. A direct URL like `/buildsets?buildset={buildset_uuid}&job={job_uuid}` opens the buildset drawer and fetches that job's logs.
+
 ---
 
 ## Redis Keys Reference
@@ -491,7 +553,9 @@ The React dashboard (`web/src/hooks/useStatusPolling.ts`) polls this endpoint on
 | `torri:change:{number}:{patchset}` | string (pickle) | Versioned `GerritChange` | 7 days |
 | `torri:pipeline:{name}:queue` | list | Change IDs in queue | none |
 | `torri:started:{pipeline}:{change}:{patchset}` | string | Duplicate-guard sentinel | none |
-| `torri:job:{pipeline}:{change}:{job_name}` | string (JSON) | Job state dict | none |
+| `torri:change:buildset:{change}:{patchset}:{pipeline}` | string | Active buildset UUID lookup | 7 days |
+| `torri:buildset:{buildset_uuid}` | string (JSON) | Buildset state, jobs, timings, summary, log URLs | 7 days |
+| `torri:log:{job_uuid}` | list | Job log lines plus EOF sentinel | none |
 | `torri:ui:status` | string (JSON) | Full status snapshot | none |
 
 ---
@@ -505,5 +569,6 @@ The React dashboard (`web/src/hooks/useStatusPolling.ts`) polls this endpoint on
 | Trigger bridge | `_trigger_bridge()` | `trigger_kafka.getEvent()` |
 | Scheduler loop | `SchedulerQueue.run()` | `event_queue.get(timeout=1)` |
 | Merge worker | `_merge_worker()` | Kafka `merger-responses` poll |
-| Job worker (×N) | `_run_job()` | `time.sleep()` (mock) |
+| Result consumer | `ResultConsumer.run()` | Kafka `job-results` poll |
+| Executor job worker (×N) | `JobWorker.run()` | Ansible playbook subprocesses |
 | Status API | uvicorn (FastAPI) | incoming HTTP requests |
