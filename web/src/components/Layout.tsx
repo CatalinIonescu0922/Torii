@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-
+import logo from '../assets/white_logo.png'
 interface LayoutProps {
   children: React.ReactNode;
 }
@@ -14,7 +14,7 @@ export function Layout({ children }: LayoutProps) {
       <header className="bg-white border-b">
         <div className="max-w-7xl mx-auto px-8 py-4">
           <div className="flex items-center justify-between">
-            <h1 className="text-2xl font-bold text-gray-900">Torii</h1>
+            <h1 className="text-2xl font-bold text-gray-900"><img src={logo} alt="" height='125px' width='125px'/></h1>
             <nav className="flex gap-8">
               <Link to="/" className={`pb-2 font-medium transition ${isActive('/')}`}>
                 Active Status

@@ -211,9 +211,10 @@ class ChangeNetworkManager:
 class GerritRestConnection(BaseConnection):
     """REST client for querying Gerrit changes."""
 
-    def __init__(self, base_url, auth=None, redis=None):
+    def __init__(self, base_url, canonical_url=None,auth=None, redis=None):
         self.logger = get_logger("torri.connection.gerrit")
         self.base_url = base_url.rstrip("/")
+        self.canonical_url = canonical_url
         self.session = requests.Session()
         self._authenticated = auth is not None
         if auth:
@@ -222,9 +223,10 @@ class GerritRestConnection(BaseConnection):
         self._network_manager = ChangeNetworkManager()
         self.executor = ThreadPoolExecutor(max_workers=5)
         self.logger.debug(
-            "Initialized GerritRestConnection base_url=%s authenticated=%s",
+            "Initialized GerritRestConnection base_url=%s authenticated=%s and canonical url=%s",
             self.base_url,
             self._authenticated,
+            self.canonical_url
         )
 
     def query(self, change_number):
@@ -407,7 +409,7 @@ class GerritRestConnection(BaseConnection):
         self.logger.debug("Network manager state=%s change=%s", should_fetch, change_number)
         if should_fetch == 'inflight':
             self.logger.warning("Circular dependency on change %s, returning in-flight object.", change_number)
-            return payload or GerritChange()
+            return payload or GerritChange(self.canonical_url)
         if should_fetch == 'wait':
             self.logger.debug("Waiting for in-flight fetch on change=%s", change_number)
             payload.wait()
@@ -416,11 +418,11 @@ class GerritRestConnection(BaseConnection):
                 change = self.redis.get_change(change_number, change_patchset)
                 if change:
                     return change
-            return GerritChange()
+            return GerritChange(self.canonical_url)
 
         # should_fetch == 'fetch'
         try:
-            change = GerritChange()
+            change = GerritChange(self.canonical_url)
             self._network_manager.register(str(change_number), change)
             self.logger.debug("Fetching and updating change=%s patchset=%s", change_number, change_patchset)
             return self._updateChange(change, change_number, change_patchset, history=history)

@@ -172,7 +172,9 @@ class ConfigurationManager:
         protocol = 'https' if self.gerrit_rest_https else 'http'
         fallback = f"{protocol}://{self.gerrit_server}:{self.gerrit_rest_port}"
         return self._get_value('connection gerrit', 'base_url', fallback)
-    
+    @property
+    def cononical_url(self) -> str:
+        return self._get_value('connection gerrit' , 'canonical_url')
     @property
     def gerrit_rest_url(self) -> str:
         """Build full Gerrit REST API URL."""

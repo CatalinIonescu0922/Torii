@@ -142,16 +142,4 @@ __all__ = [
     'GerritChange',
     'ChangeFactory',
 ]
-        
-        Args:
-            message: Comment text
-            labels: VCS-specific labels/votes (optional)
-        
-        Returns:
-            bool: Success status
-        """
-        pass
-    
-    def __repr__(self):
-        """String representation."""
-        return f'<Change {self.source}:{self.project}/{self.change_id}>'
+

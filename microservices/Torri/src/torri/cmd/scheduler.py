@@ -63,6 +63,7 @@ def main():
 
     gerrit_conn = GerritRestConnection(
         config.gerrit_base_url,
+        canonical_url=config.cononical_url,
         auth=(config.gerrit_user, config.gerrit_password) if config.gerrit_password else None,
         redis=TorriRedis(config.redis_url),
     )

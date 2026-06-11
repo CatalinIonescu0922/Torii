@@ -11,8 +11,8 @@ known_labels = [
 
 class GerritChange:
     """Gerrit change information"""
-    def __init__(self):
-        self.base_url = ""
+    def __init__(self , canonical_url):
+        self.base_url = canonical_url
         self.project = ""
         self.branch = ""
         self.id = ""

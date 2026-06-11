@@ -79,7 +79,7 @@ function ChangeCard({ change, onJobClick }: { change: Change; onJobClick: (j: Se
     <div className="bg-white border rounded-lg p-5 shadow-sm hover:shadow transition-shadow">
       <div className="flex justify-between items-start mb-4">
         <div>
-          <a href={change.url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline font-medium text-lg block">
+          <a href={change.url} target="_blank" className="text-blue-600 hover:underline font-medium text-lg block">
             {change.project}: {change.subject}
           </a>
           <span className="text-sm text-gray-500 mt-1 inline-block">
