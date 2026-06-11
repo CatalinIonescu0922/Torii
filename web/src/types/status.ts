@@ -2,6 +2,10 @@ export interface Job {
   job_uuid: string;
   job_name: string;
   status: 'queued' | 'running' | 'success' | 'failure' | 'timeout' | 'cancelled';
+  start_time?: string | null;
+  end_time?: string | null;
+  duration_seconds?: number | null;
+  log_url?: string;
 }
 
 export interface Change {
@@ -35,5 +39,6 @@ export interface Buildset {
   branch: string;
   status: 'running' | 'succeeded' | 'failed';
   created_at: string;
+  summary?: string;
   jobs: Job[];
 }

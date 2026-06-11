@@ -5,10 +5,28 @@ interface BuildsetDrawerProps {
   onClose: () => void;
   onJobClick?: (job: Job) => void;
   jobLogs?: string[] | null;
+  selectedJobUuid?: string | null;
 }
 
-export function BuildsetDrawer({ buildset, onClose, onJobClick, jobLogs }: BuildsetDrawerProps) {
+export function BuildsetDrawer({ buildset, onClose, onJobClick, jobLogs, selectedJobUuid }: BuildsetDrawerProps) {
   if (!buildset) return null;
+
+  const formatDurationSeconds = (durationSeconds: number) => {
+    if (durationSeconds < 60) return `${durationSeconds.toFixed(3)}s`;
+    const minutes = Math.floor(durationSeconds / 60);
+    const seconds = durationSeconds % 60;
+    return `${minutes}m ${seconds.toFixed(3).padStart(6, '0')}s`;
+  };
+
+  const getJobDuration = (job: Job) => {
+    if (typeof job.duration_seconds === 'number') {
+      return formatDurationSeconds(job.duration_seconds);
+    }
+    if (!job.start_time) return 'Not started';
+    const startTime = new Date(job.start_time).getTime();
+    const endTime = job.end_time ? new Date(job.end_time).getTime() : Date.now();
+    return formatDurationSeconds(Math.max(0, (endTime - startTime) / 1000));
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -78,18 +96,31 @@ export function BuildsetDrawer({ buildset, onClose, onJobClick, jobLogs }: Build
           <div>
             <h3 className="text-sm font-medium text-gray-900 mb-3">Jobs ({buildset.jobs.length})</h3>
             <div className="space-y-2">
-              {buildset.jobs.map(job => (
-                <div
-                  key={job.job_uuid}
-                  className={`p-3 rounded border ${getStatusColor(job.status)} cursor-pointer hover:bg-gray-50 transition`}
-                  onClick={() => onJobClick?.(job)}
-                >
-                  <div className="flex justify-between items-center">
-                    <span className="font-medium">{job.job_name}</span>
-                    <span className="text-xs uppercase font-semibold">{job.status}</span>
+              {buildset.jobs.map(job => {
+                const isSelected = selectedJobUuid === job.job_uuid;
+                return (
+                  <div
+                    key={job.job_uuid}
+                    className={`p-3 rounded border ${getStatusColor(job.status)} ${isSelected ? 'ring-2 ring-blue-300' : ''} cursor-pointer hover:bg-gray-50 transition`}
+                    onClick={() => onJobClick?.(job)}
+                  >
+                    <div className="flex justify-between items-center gap-3">
+                      <span className="font-medium truncate">{job.job_name}</span>
+                      <span className="text-xs uppercase font-semibold flex-shrink-0">{job.status}</span>
+                    </div>
+                    <div className="mt-2 flex justify-between items-center gap-3 text-xs">
+                      <span>Duration: <span className="font-medium">{getJobDuration(job)}</span></span>
+                      <a
+                        href={job.log_url || `/buildsets?buildset=${buildset.buildset_uuid}&job=${job.job_uuid}`}
+                        onClick={event => event.stopPropagation()}
+                        className="font-medium underline underline-offset-2"
+                      >
+                        Logs
+                      </a>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
