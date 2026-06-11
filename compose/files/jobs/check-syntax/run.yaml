@@ -1,16 +1,26 @@
 ---
-- name: Check syntax for api-gateway
+# run.yaml — main job phase, runs after pre.yaml has copied the source into /src.
+#
+# By this point the merged checkout is already at /src inside the runner container.
+# We print every regular file (excluding .git and the injected playbooks subtree)
+# as proof that the merger → executor → container pipeline is working end to end.
+
+- name: Print merged source files from runner
   hosts: all
   gather_facts: no
+  vars:
+    container_src: /src
   tasks:
-    - name: Verify playbook execution
-      debug:
-        msg: "Check-syntax job running on api-gateway"
-
-    - name: Simple Python syntax check
+    - name: Print each source file
       shell: |
-          #!/bin/bash
-          for i in {1..500}; do
-            echo "Step $i"
-            sleep 1
+        set -eu
+        find "{{ container_src }}" \
+          -type f \
+          ! -path "{{ container_src }}/.git/*" \
+          ! -path "{{ container_src }}/playbooks/*" \
+          -print | sort | while IFS= read -r f; do
+            rel="${f#{{ container_src }}/}"
+            echo "----- BEGIN ${rel} -----"
+            cat "${f}"
+            echo "----- END ${rel} -----"
           done

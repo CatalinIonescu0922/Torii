@@ -207,11 +207,7 @@ class JobWorker:
         image = self.config.get_image_for_label(label)
         if image:
             logger.info("[RUNNER] Found Docker image for label=%s: image=%s", label, image)
-            return DockerRunner(
-                node_name=node_name,
-                image=image,
-                source_dir=os.path.join(self.job_dir, "src"),
-            )
+            return DockerRunner(node_name=node_name, image=image)
 
         # Fall back to SSH runner from the node pool.
         logger.info("[RUNNER] No Docker image, trying SSH pool...")

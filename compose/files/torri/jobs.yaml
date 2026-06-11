@@ -19,6 +19,7 @@ jobs:
       name: check-syntax
       nodeset: single-python
       timeout: 120
+      pre-run: playbooks/check-syntax/pre.yaml
       run: playbooks/check-syntax/run.yaml
 
   - job:

@@ -5,7 +5,7 @@ Creates an ephemeral Docker container for the job.  Ansible uses the
 docker connection plugin to exec tasks inside it.
 
 Container lifecycle:
-    acquire()  → docker run -d --mount source checkout --name torii-{job_uuid}-{node_name} {image} sleep infinity
+    acquire()  → docker run -d --name torii-{job_uuid}-{node_name} {image} sleep infinity
   release()  → docker rm -f {container_name}
 """
 
@@ -18,10 +18,9 @@ logger = logging.getLogger("executor.runners.docker")
 
 
 class DockerRunner(BaseRunner):
-    def __init__(self, node_name: str, image: str, source_dir: str):
+    def __init__(self, node_name: str, image: str):
         self.node_name = node_name
         self.image = image
-        self.source_dir = source_dir
         self.container_name = ""
 
     def acquire(self, job_uuid: str) -> None:
@@ -29,15 +28,10 @@ class DockerRunner(BaseRunner):
         cmd = [
             "docker", "run", "-d",
             "--name", self.container_name,
-            "--mount", f"type=bind,source={self.source_dir},target={self.source_dir}",
-            "--workdir", self.source_dir,
             self.image,
             "sleep", "infinity",
         ]
-        logger.info(
-            "[DOCKER] Executing docker run: image=%s container=%s source_dir=%s",
-            self.image, self.container_name, self.source_dir,
-        )
+        logger.info("[DOCKER] Executing docker run: image=%s container=%s", self.image, self.container_name)
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             logger.error("[DOCKER] docker run failed: returncode=%d", result.returncode)
@@ -67,8 +61,7 @@ class DockerRunner(BaseRunner):
         variables = {
             "ansible_connection": "docker",
             "ansible_host": self.container_name,
-            "ansible_user": "root",
-            "torii_src_dir": self.source_dir,
+            "ansible_user": "root"
         }
         logger.debug("[DOCKER] Inventory vars: %s", variables)
         return variables

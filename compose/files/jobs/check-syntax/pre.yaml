@@ -1,0 +1,29 @@
+---
+# pre.yaml — runs before the main job, targeting the Docker runner container.
+#
+# playbook_dir resolves to:
+#   {job_dir}/src/playbooks/check-syntax/
+# so playbook_dir/../.. is the executor-side checkout root:
+#   {job_dir}/src/
+#
+# The Ansible `copy` module always runs from the controller (executor),
+# uploading to the target host (Docker container via `ansible_connection=docker`).
+# No bind mount, no host-level volume — plain Ansible file transfer.
+
+- name: Copy merged source into runner container
+  hosts: all
+  gather_facts: no
+  vars:
+    executor_src: "{{ playbook_dir }}/../.."
+    container_src: /src
+  tasks:
+    - name: Create /src inside runner
+      file:
+        path: "{{ container_src }}"
+        state: directory
+        mode: "0755"
+
+    - name: Upload merged checkout into runner
+      copy:
+        src: "{{ executor_src }}/"
+        dest: "{{ container_src }}/"
