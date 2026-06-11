@@ -30,6 +30,7 @@ class SchedulerQueue(threading.Thread):
         yaml_dir: str,
         redis_url: Optional[str] = None,
         kafka_bootstrap: str = "kafka:9092",
+        web_root_url: str = "",
         drivers: Optional[Dict] = None,
     ):
         super().__init__(daemon=True, name="SchedulerQueue")
@@ -39,6 +40,7 @@ class SchedulerQueue(threading.Thread):
         self.yaml_dir = yaml_dir
         self.redis = TorriRedis(redis_url)
         self.kafka_bootstrap = kafka_bootstrap
+        self.web_root_url = web_root_url
         self.drivers = drivers or {}
         self.event_queue: queue.Queue = queue.Queue()
         self.running = False
@@ -227,12 +229,18 @@ class SchedulerQueue(threading.Thread):
 
                 def on_done(
                     status,
+                    summary="",
                     _pc=captured_pipeline_config,
                     _ps=captured_patchset,
                     _cid=change_id,
                     _pname=pipeline_name,
                     _is_gate=captured_is_gate,
                 ):
+                    if summary and _ps:
+                        try:
+                            self.source.postReview(_cid, _ps, message=summary)
+                        except Exception as e:
+                            self.logger.error("Failed to post build summary for change %s: %s", _cid, e, exc_info=True)
                     actions = _pc.success_actions if status == "succeeded" else _pc.failure_actions
                     for action in actions:
                         action.report(_cid, _ps)
@@ -295,6 +303,7 @@ class SchedulerQueue(threading.Thread):
                         kafka_bootstrap=self.kafka_bootstrap,
                         redis=self.redis,
                         on_done=_on_done,
+                        web_root_url=self.web_root_url,
                     )
 
                 if not captured_ref:

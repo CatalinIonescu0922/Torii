@@ -8,7 +8,7 @@ The result consumer updates it as jobs finish and fires on_done when all are don
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import List
+from typing import List, Optional
 
 
 @dataclass
@@ -16,6 +16,10 @@ class JobInBuildset:
     job_uuid: str
     job_name: str
     status: str = "queued"  # queued, running, success, failure, timeout, cancelled
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    duration_seconds: Optional[float] = None
+    log_url: str = ""
 
 
 @dataclass
@@ -29,6 +33,7 @@ class Buildset:
     jobs: List[JobInBuildset]
     status: str = "running"  # running, succeeded, failed
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    summary: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -40,8 +45,17 @@ class Buildset:
             "branch": self.branch,
             "status": self.status,
             "created_at": self.created_at,
+            "summary": self.summary,
             "jobs": [
-                {"job_uuid": j.job_uuid, "job_name": j.job_name, "status": j.status}
+                {
+                    "job_uuid": j.job_uuid,
+                    "job_name": j.job_name,
+                    "status": j.status,
+                    "start_time": j.start_time,
+                    "end_time": j.end_time,
+                    "duration_seconds": j.duration_seconds,
+                    "log_url": j.log_url,
+                }
                 for j in self.jobs
             ],
         }

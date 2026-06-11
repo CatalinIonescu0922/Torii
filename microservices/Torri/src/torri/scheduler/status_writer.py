@@ -120,6 +120,10 @@ def _collect_jobs(redis: TorriRedis, pipeline_name: str, change_id: str, patchse
             "job_uuid": j.get("job_uuid", ""),
             "job_name": j.get("job_name", ""),
             "status": j.get("status", "queued"),
+            "start_time": j.get("start_time"),
+            "end_time": j.get("end_time"),
+            "duration_seconds": j.get("duration_seconds"),
+            "log_url": j.get("log_url", ""),
         }
         for j in buildset_data.get("jobs", [])
     ]

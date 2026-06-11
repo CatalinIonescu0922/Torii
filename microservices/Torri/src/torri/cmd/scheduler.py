@@ -78,6 +78,7 @@ def main():
         yaml_dir=yaml_dir,
         redis_url=config.redis_url,
         kafka_bootstrap=kafka_bootstrap,
+        web_root_url=config.web_root_url,
         drivers=drivers,
     )
 

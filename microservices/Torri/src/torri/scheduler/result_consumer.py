@@ -72,6 +72,9 @@ class ResultConsumer(threading.Thread):
         buildset_uuid = result.get("buildset_uuid", "")
         job_name = result.get("job_name", "")
         status = result.get("status", "failure")
+        start_time = result.get("start_time")
+        end_time = result.get("end_time")
+        duration_seconds = result.get("duration_seconds")
 
         if not job_uuid or not buildset_uuid:
             logger.warning("job-result missing job_uuid or buildset_uuid: %s", result)
@@ -82,6 +85,15 @@ class ResultConsumer(threading.Thread):
             job_name, buildset_uuid, status,
         )
 
-        executor_dispatcher.on_job_result(self.redis, job_uuid, buildset_uuid, job_name, status)
+        executor_dispatcher.on_job_result(
+            self.redis,
+            job_uuid,
+            buildset_uuid,
+            job_name,
+            status,
+            start_time=start_time,
+            end_time=end_time,
+            duration_seconds=duration_seconds,
+        )
         logger.debug(f"update ui redis from result consumer for this pipelines %s" , self.pipeline_names)
         refresh_status(self.redis, self.pipeline_names)

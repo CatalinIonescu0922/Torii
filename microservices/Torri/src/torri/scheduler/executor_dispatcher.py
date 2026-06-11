@@ -34,6 +34,7 @@ BUILDSET_KEY_PREFIX = "torri:buildset:"
 # maps change+patchset+pipeline → buildset_uuid for status_writer lookups
 BUILDSET_LOOKUP_PREFIX = "torri:change:buildset:"
 BUILDSET_TTL = 7 * 24 * 3600  # 7 days
+TERMINAL_JOB_STATUSES = {"success", "failure", "timeout", "cancelled", "succeeded", "failed"}
 
 # Maps buildset_uuid → in-flight tracking state.
 # Accessed from multiple threads (dispatcher + result_consumer).
@@ -53,7 +54,8 @@ def dispatch(
     synthetic_ref: str,
     kafka_bootstrap: str,
     redis: TorriRedis,
-    on_done: Callable[[str], None],
+    on_done: Callable[[str, str], None],
+    web_root_url: str = "",
 ) -> str:
     """
     Create a buildset and dispatch all jobs to the executor via Kafka.
@@ -64,11 +66,20 @@ def dispatch(
     Returns the buildset_uuid.
     """
     if not job_names:
-        on_done("succeeded")
+        on_done("succeeded", "")
         return ""
 
     buildset_uuid = uuid.uuid4().hex
-    jobs = [JobInBuildset(job_uuid=uuid.uuid4().hex, job_name=name) for name in job_names]
+    jobs = []
+    for name in job_names:
+        job_uuid = uuid.uuid4().hex
+        jobs.append(
+            JobInBuildset(
+                job_uuid=job_uuid,
+                job_name=name,
+                log_url=_build_job_log_url(web_root_url, buildset_uuid, job_uuid),
+            )
+        )
     buildset = Buildset(
         buildset_uuid=buildset_uuid,
         change_id=change_id,
@@ -135,13 +146,22 @@ def dispatch(
         logger.error("Failed to dispatch jobs for buildset=%s: %s", buildset_uuid, e, exc_info=True)
         with _pending_lock:
             _pending.pop(buildset_uuid, None)
-        on_done("failed")
+        on_done("failed", "")
         return buildset_uuid
 
     return buildset_uuid
 
 
-def on_job_result(redis: TorriRedis, job_uuid: str, buildset_uuid: str, job_name: str, status: str) -> None:
+def on_job_result(
+    redis: TorriRedis,
+    job_uuid: str,
+    buildset_uuid: str,
+    job_name: str,
+    status: str,
+    start_time: Optional[str] = None,
+    end_time: Optional[str] = None,
+    duration_seconds: Optional[float] = None,
+) -> None:
     """
     Called by result_consumer when a single job finishes.
 
@@ -162,17 +182,18 @@ def on_job_result(redis: TorriRedis, job_uuid: str, buildset_uuid: str, job_name
             failed = False
             for j in bs_dict.get("jobs", []):
                 if j.get("job_uuid") == job_uuid:
-                    j["status"] = status
+                    _apply_job_dict_result(j, status, start_time, end_time, duration_seconds)
                 
                 j_status = j.get("status")
-                if j_status in ("success", "failure", "succeeded", "failed"):
+                if j_status in TERMINAL_JOB_STATUSES:
                     done_count += 1
-                if j_status == "failure" or j_status == "failed":
+                if j_status in ("failure", "failed"):
                     failed = True
             
             all_done = done_count == len(bs_dict.get("jobs", []))
             if all_done:
                 bs_dict["status"] = "failed" if failed else "succeeded"
+                bs_dict["summary"] = _build_summary_from_dict(bs_dict)
                 # If fully disconnected, at least remove it from the queue so the UI drops it
                 pipeline = bs_dict.get("pipeline")
                 change_id = bs_dict.get("change_id")
@@ -186,18 +207,28 @@ def on_job_result(redis: TorriRedis, job_uuid: str, buildset_uuid: str, job_name
 
         for job in buildset.jobs:
             if job.job_uuid == job_uuid:
+                was_done = job.status in TERMINAL_JOB_STATUSES
                 job.status = status
+                if start_time:
+                    job.start_time = start_time
+                if end_time:
+                    job.end_time = end_time
+                if duration_seconds is not None:
+                    job.duration_seconds = duration_seconds
+                elif job.start_time and job.end_time:
+                    job.duration_seconds = _calculate_duration_seconds(job.start_time, job.end_time)
+                if status in TERMINAL_JOB_STATUSES and not was_done:
+                    entry["done"] += 1
                 break
 
-        if status == "failure":
+        if status in ("failure", "failed"):
             entry["failed"] = True
-        if status == "failure" or status == "success":
-            entry["done"] += 1
 
         all_done = entry["done"] == entry["total"]
 
         if all_done:
             buildset.status = "failed" if entry["failed"] else "succeeded"
+            buildset.summary = _build_summary(buildset)
             _pending.pop(buildset_uuid)
 
     # Update Redis with the latest buildset state.
@@ -205,4 +236,82 @@ def on_job_result(redis: TorriRedis, job_uuid: str, buildset_uuid: str, job_name
     redis.set_state(redis_key, buildset.to_dict())
 
     if all_done:
-        entry["on_done"]("failed" if entry["failed"] else "succeeded")
+        entry["on_done"]("failed" if entry["failed"] else "succeeded", buildset.summary)
+
+
+def _build_job_log_url(web_root_url: str, buildset_uuid: str, job_uuid: str) -> str:
+    path = f"/buildsets?buildset={buildset_uuid}&job={job_uuid}"
+    if not web_root_url:
+        return path
+    return f"{web_root_url.rstrip('/')}{path}"
+
+
+def _apply_job_dict_result(
+    job: dict,
+    status: str,
+    start_time: Optional[str],
+    end_time: Optional[str],
+    duration_seconds: Optional[float],
+) -> None:
+    job["status"] = status
+    if start_time:
+        job["start_time"] = start_time
+    if end_time:
+        job["end_time"] = end_time
+    if duration_seconds is not None:
+        job["duration_seconds"] = duration_seconds
+    elif job.get("start_time") and job.get("end_time"):
+        job["duration_seconds"] = _calculate_duration_seconds(job["start_time"], job["end_time"])
+
+
+def _calculate_duration_seconds(start_time: str, end_time: str) -> Optional[float]:
+    try:
+        start = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+        end = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
+        return round((end - start).total_seconds(), 3)
+    except ValueError:
+        return None
+
+
+def _build_summary(buildset: Buildset) -> str:
+    buildset_dict = buildset.to_dict()
+    return _build_summary_from_dict(buildset_dict)
+
+
+def _build_summary_from_dict(buildset: dict) -> str:
+    status = _format_status(buildset.get("status", "finished"))
+    lines = [
+        f"[Torii] {buildset.get('pipeline', '')} build finished for change {buildset.get('change_id', '')}, patchset {buildset.get('patchset', '')}: {status}",
+        "",
+        "Jobs:",
+    ]
+    for job in buildset.get("jobs", []):
+        duration = _format_duration(job.get("duration_seconds"))
+        lines.append(
+            f"- {job.get('job_name', '')}: {_format_status(job.get('status', 'unknown'))}, {duration}, logs: {job.get('log_url', '')}"
+        )
+    return "\n".join(lines)
+
+
+def _format_status(status: str) -> str:
+    labels = {
+        "success": "Success",
+        "succeeded": "Success",
+        "failure": "Failed",
+        "failed": "Failed",
+        "running": "Running",
+        "queued": "Queued",
+        "timeout": "Timeout",
+        "cancelled": "Cancelled",
+    }
+    return labels.get(status, status.capitalize())
+
+
+def _format_duration(duration_seconds: Optional[float]) -> str:
+    if duration_seconds is None:
+        return "duration unavailable"
+    if duration_seconds < 60:
+        return f"{duration_seconds:.3f}s"
+    minutes = int(duration_seconds // 60)
+    seconds = duration_seconds % 60
+    return f"{minutes}m {seconds:06.3f}s"
