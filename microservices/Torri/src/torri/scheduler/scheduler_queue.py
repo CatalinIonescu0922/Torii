@@ -224,7 +224,7 @@ class SchedulerQueue(threading.Thread):
                 # Capture loop variables for the closures
                 captured_pipeline_config = pipeline.config
                 captured_patchset = event.patch_number
-                captured_ref = event.ref  # TODO create a function that create the ref based on the dependencies 
+                captured_refs = self._collect_patchset_refs(change)
                 captured_is_gate = isinstance(pipeline, DependentPipeline)
 
                 def on_done(
@@ -306,9 +306,9 @@ class SchedulerQueue(threading.Thread):
                         web_root_url=self.web_root_url,
                     )
 
-                if not captured_ref:
+                if not captured_refs:
                     self.logger.error(
-                        "No patchset ref for change %s patchset %s — cannot request merge",
+                        "No patchset refs for change %s patchset %s — cannot request merge",
                         change_id, event.patch_number,
                     )
                     on_done("failed")
@@ -319,12 +319,53 @@ class SchedulerQueue(threading.Thread):
                     job_id=merge_job_id,
                     project=self.source.getGitUrl(project_name),
                     branch=branch,
-                    patchset_refs=[captured_ref],
+                    patchset_refs=captured_refs,
                     on_done=on_merge_done,
                 )
 
         except Exception as e:
             self.logger.error("Error processing event: %s", e, exc_info=True)
+
+    def _collect_patchset_refs(self, change) -> List[str]:
+        """Return an ordered list of patchset refs for *change* and every
+        change in its ``needs_changes`` dependency chain.
+
+        Refs are ordered deepest-ancestor-first so that the merger applies
+        them in the correct topological order (dependencies before the change
+        that needs them).  Cycles are silently broken via a *seen* set.
+        """
+        refs: List[str] = []
+        seen: set = set()
+
+        def _ref_for(c) -> Optional[str]:
+            if c.current_revision:
+                ref = c.current_revision.get("ref")
+                if ref:
+                    return str(ref)
+            # Fallback: construct the standard Gerrit ref from number + patchset.
+            if c.number and c.patchset:
+                last_two = int(c.number) % 100
+                return f"refs/changes/{last_two:02d}/{c.number}/{c.patchset}"
+            return None
+
+        def _collect(c):
+            if c is None or c.number in seen:
+                return
+            seen.add(c.number)
+            # Recurse into dependencies first so they are fetched before this change.
+            for dep in (c.needs_changes or []):
+                _collect(dep)
+            ref = _ref_for(c)
+            if ref:
+                refs.append(ref)
+            else:
+                self.logger.warning(
+                    "Could not determine patchset ref for change %s patchset %s — skipping",
+                    c.number, c.patchset,
+                )
+
+        _collect(change)
+        return refs
 
     # def verify_triggers_for_pipeline(trigger_dict : dict , event):
     #     if event.event_source == "gerrit":
