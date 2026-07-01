@@ -307,12 +307,12 @@ class SchedulerQueue(threading.Thread):
                     )
 
                     if not captured_refs:
-                    self.logger.error(
-                        "No patchset refs for change %s patchset %s — cannot request merge",
-                        change_id, event.patch_number,
-                    )
-                    on_done("failed")
-                    continue
+                        self.logger.error(
+                            "No patchset refs for change %s patchset %s — cannot request merge",
+                            change_id, event.patch_number,
+                        )
+                        on_done("failed")
+                        continue
 
                 merge_job_id = f"{pipeline_name}:{change_id}:{event.patch_number}"
                 request_merge(
