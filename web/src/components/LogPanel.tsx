@@ -11,9 +11,12 @@ interface LogPanelProps {
 
 function wsUrl(jobUuid: string): string {
   const envBaseUrl = import.meta.env.VITE_STATUS_API_WS_URL?.trim();
-  const baseUrl = envBaseUrl && envBaseUrl.length > 0 ? envBaseUrl.replace(/\/$/, '') : 'ws://127.0.0.1:8000';
-
-  return `${baseUrl}/ws/job/${jobUuid}/logs`;
+  if (envBaseUrl && envBaseUrl.length > 0) {
+    return `${envBaseUrl.replace(/\/$/, '')}/ws/job/${jobUuid}/logs`;
+  }
+  // Derive from current page origin so it works behind any reverse proxy
+  const wsScheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${wsScheme}//${window.location.host}/ws/job/${jobUuid}/logs`;
 }
 
 export function LogPanel({ jobUuid, jobName, onClose }: LogPanelProps) {

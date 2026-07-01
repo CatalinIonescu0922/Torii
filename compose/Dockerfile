@@ -108,3 +108,20 @@ COPY --link compose/files/jobs/ /app/jobs/
 RUN chmod 700 /root/.ssh && \
     chmod 600 /root/.ssh/Torri_ed25519 && \
     mkdir -p /var/torii/jobs /etc/torri
+
+
+# Web Builder
+FROM node:20-alpine AS web-builder
+
+WORKDIR /app
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+COPY web/ ./
+RUN npm run build
+
+
+# Web Service
+FROM nginx:alpine AS web
+
+COPY --from=web-builder /app/dist /usr/share/nginx/html
+COPY compose/files/nginx/web-spa.conf /etc/nginx/conf.d/default.conf

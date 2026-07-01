@@ -22,6 +22,8 @@ services:
         condition: service_healthy
       kafka-ui:
         condition: service_started
+      web:
+        condition: service_started
       # scheduler:
       #   condition: service_started
 

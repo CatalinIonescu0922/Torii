@@ -97,7 +97,7 @@ function BuildsetsRoute() {
 
 function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename="/t">
       <Layout>
         <Routes>
           <Route path="/" element={<Dashboard />} />

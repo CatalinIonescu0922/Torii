@@ -1,0 +1,11 @@
+services:
+  web:
+    extends:
+      file: build.yaml
+      service: web
+    container_name: torii_web
+    restart: unless-stopped
+    expose:
+      - "80"
+    networks:
+      - torii

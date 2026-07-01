@@ -45,6 +45,13 @@ services:
   nginx:
     image: nginx:alpine
     container_name: nginx
+
+  web:
+    pull_policy: build
+    build:
+      context: ../
+      dockerfile: compose/Dockerfile
+      target: web
     # depends_on:
     #   gerrit:
     #     condition: service_healthy

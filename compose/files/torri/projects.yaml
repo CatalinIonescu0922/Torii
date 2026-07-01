@@ -7,7 +7,6 @@ filters:
       - reviewer-added
       
 projects:
-  # Infrastructure
   - project:
       name: infrastructure/terraform
       branches:
@@ -23,18 +22,14 @@ projects:
           - unit-tests
           - integration-tests
 
-
-  # Backend Services
   - project:
       name: services/api-gateway
       check:
         jobs:
           - check-syntax
-          # - integration-tests
       gate:
         jobs:
           - unit-tests
-          # - integration-tests
       merge-mode: cherry-pick
       branches:
         - main

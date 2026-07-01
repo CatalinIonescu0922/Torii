@@ -306,7 +306,7 @@ class SchedulerQueue(threading.Thread):
                         web_root_url=self.web_root_url,
                     )
 
-                if not captured_refs:
+                    if not captured_refs:
                     self.logger.error(
                         "No patchset refs for change %s patchset %s — cannot request merge",
                         change_id, event.patch_number,
