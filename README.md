@@ -34,6 +34,17 @@ cd compose
 
 The Compose stack is split across smaller service definitions such as `gerrit.yaml`, `kafka.yaml`, `redis.yaml`, `server.yaml`, `web.yaml`, and `nginx.yaml`, with `compose.yaml` combining them into the full environment.
 
+## Configuration Files
+
+The Torri CI configuration lives in `compose/files/torri/`:
+
+- `projects.yaml` - defines which repositories Torri watches and which jobs run on each pipeline
+- `pipelines.yaml` - defines the check and gate pipelines, triggers, and success or failure behavior
+- `jobs.yaml` - lists the jobs Torri can run, including timeouts and playbook paths
+- `nodesets.yaml` - defines the available execution nodes and their labels
+
+These files describe the CI behavior without requiring any local service setup.
+
 ## Notes
 
 - The stack is fully containerized; no local service installation is required beyond Docker and Docker Compose.
